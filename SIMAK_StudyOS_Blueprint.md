@@ -1,10 +1,20 @@
-# SIMAK Study OS — Blueprint Eksekusi v2.0
+# SIMAK Study OS — Blueprint Eksekusi v2.1
 > Dokumen ini adalah spesifikasi lengkap untuk dieksekusi oleh Claude Opus via Kiro.
-> **v2.0 (Mei 2026)** — Revisi besar atas v1.0 dengan fokus pada metode belajar berbasis riset, UI minimalis-tegas, dan efisiensi proses.
+> **v2.1 (Mei 2026)** — Tambahan **Daily Seed module** dengan markdown-based question submission, source-aware question routing, dan hybrid variation pipeline.
 
 ---
 
-## 0. RINGKASAN PERUBAHAN DARI v1.0
+## 0. RINGKASAN PERUBAHAN
+
+### v2.1 → tambahan dari v2.0
+- **Daily Seed module** (Modul 9 baru) — user submit soal asli SIMAK via file `.md`
+- **Source-aware question routing** — setiap soal punya tag `seed_real` / `variation` / `pure_llm`
+- **Hybrid variation pipeline** — 1 variasi auto saat submit, sisanya lazy on-demand
+- **Mock Exam locked to seed bank** — gold standard, no LLM-only questions
+- **Dual-pass validation** — solver pass cross-check generator pass (anti-hallucination)
+- **Trust score per soal** — UI badge transparan ke user
+
+### v2.0 → tambahan dari v1.0
 
 | Area | v1.0 | v2.0 |
 |---|---|---|
@@ -69,7 +79,8 @@ App
         ├── MockExam          (Modul 5)
         ├── StudyPlanner      (Modul 6)
         ├── MistakeNotebook   (Modul 7)
-        └── Settings          (Modul 8) — API key, export/import, theme
+        ├── DailySeed         (Modul 8) — submit & manage seed bank (NEW v2.1)
+        └── Settings          (Modul 9) — API key, export/import, theme
 ```
 
 ---
@@ -137,6 +148,17 @@ const initialState = {
   focusSessions: [],  // { startedAt, durationMin, taskType, completed }
   totalFocusMinutes: 0,
 
+  // ─── Daily Seed Bank (NEW v2.1) ───
+  // Note: full data di IndexedDB. State hanya menyimpan summary.
+  seedStats: {
+    totalSeeds: 0,           // jumlah seed_real
+    totalVariations: 0,      // jumlah variation tersimpan
+    seedsBySubject: { matematika: 0, tpa: 0, bahasa_inggris: 0, bahasa_indonesia: 0 },
+    lastSeedDate: null,
+    seedStreak: 0,           // streak harian submit (terpisah dari study streak)
+    pendingValidation: 0,    // seed yang flagged karena dual-pass mismatch
+  },
+
   // ─── Settings ───
   preferences: {
     pomodoroLength: 25,
@@ -145,6 +167,12 @@ const initialState = {
     confidenceSlider: true,
     showStreakAnxiety: false,  // bisa di-disable jika user prefer "quiet mode"
     keyboardShortcuts: true,
+    // Seed-related preferences (NEW v2.1)
+    autoVariateOnSubmit: true,    // 1 variasi otomatis saat submit
+    drillSeedRatio: 0.10,         // 10% drill = seed_real
+    drillVariationRatio: 0.60,    // 60% drill = variation
+    drillPureLLMRatio: 0.30,      // 30% drill = pure_llm
+    showSourceBadge: true,        // tampilkan badge sumber soal di UI
   },
 }
 ```
@@ -162,10 +190,16 @@ LOG_CONFIDENCE,
 START_FOCUS_SESSION, END_FOCUS_SESSION,
 UPDATE_PREFERENCES,
 INCREMENT_STREAK, USE_GRACE_DAY,
+
+# Daily Seed actions (NEW v2.1)
+ADD_SEED, UPDATE_SEED, DELETE_SEED, FLAG_SEED, RESOLVE_SEED_FLAG,
+ADD_VARIATION, DELETE_VARIATION,
+INCREMENT_SEED_STREAK, REFRESH_SEED_STATS,
+
 IMPORT_DATA, RESET_ALL
 ```
 
-Setiap action mutating menulis ke localStorage/IndexedDB sesuai kategori (lihat §10).
+Setiap action mutating menulis ke localStorage/IndexedDB sesuai kategori (lihat §23).
 
 ---
 
@@ -428,10 +462,62 @@ Dispatch `ADD_SR_ITEM` atau `REVIEW_SR_ITEM` (jika sudah ada).
 - **Confidence mode** toggle: ON menampilkan slider, OFF skip
 - **Penalty mode** toggle: simulasi penalti -1/4 (sesuai SIMAK lama)
 - **Hint mode** toggle: 1 hint tersedia per drill (untuk mode latihan, OFF untuk simulasi)
+- **Source mix** (NEW v2.1):
+  - Default: gunakan rasio dari `preferences` (10% seed / 60% variation / 30% pure_llm)
+  - Custom: slider untuk override (jika user mau drill khusus seed-only atau variation-only)
+  - Indicator: tampilkan estimasi soal seed/variation/pure_llm yang akan dipakai
 
-### Generate Soal
+### Generate Soal (Hybrid v2.1)
 
-System prompt:
+```javascript
+async function generateDrillBatch(config) {
+  const { totalCount, subjects, topics, mix } = config;
+  const seedCount = Math.round(totalCount * mix.seedRatio);
+  const variationCount = Math.round(totalCount * mix.variationRatio);
+  const pureLLMCount = totalCount - seedCount - variationCount;
+
+  const result = [];
+
+  // 1. SEED: Pull from seedBank (matching subject/topic/ELO target)
+  const seedPool = await loadFromIDB('seedBank', { subjects, topics });
+  result.push(...stratifiedSample(seedPool, seedCount, eloTarget));
+
+  // 2. VARIATION: Pull from variations DB; if shortage, generate on-demand
+  const varPool = await loadFromIDB('variations', { subjects, topics });
+  let varSelected = stratifiedSample(varPool, variationCount, eloTarget);
+
+  if (varSelected.length < variationCount) {
+    // Lazy-generate: ambil seed terdekat, generate variasi
+    const shortage = variationCount - varSelected.length;
+    const candidateSeeds = stratifiedSample(seedPool, shortage);
+    for (const seed of candidateSeeds) {
+      const newVar = await generateVariation(seed, randomStrategy());
+      if (newVar.validatedBy === 'dual_pass') varSelected.push(newVar);
+    }
+  }
+  result.push(...varSelected);
+
+  // 3. PURE_LLM: Generate batch via Claude (untuk fill remaining)
+  if (pureLLMCount > 0) {
+    const llmBatch = await callClaude([{
+      role: 'user',
+      content: buildPureLLMDrillPrompt(subjects, topics, eloTarget, pureLLMCount)
+    }], { maxTokens: 4096 });
+    result.push(...parseJSON(llmBatch).map(q => ({ ...q, type: 'pure_llm', trustScore: 0.6 })));
+  }
+
+  // 4. Shuffle for interleaving (jika mode interleave)
+  return config.interleave ? shuffle(result) : result;
+}
+```
+
+**Fallback behavior:**
+- Jika seed bank kosong → silently shift seed ratio ke variation
+- Jika variation pool kosong → generate baru on-demand (delay ~2-3s per soal)
+- Jika API error saat pure_llm generation → fill dengan variation tambahan jika tersedia
+
+### Pure-LLM Generation Prompt (untuk slot 30%)
+
 ```
 Kamu pembuat soal SIMAK UI. Output ONLY valid JSON, no markdown wrapper.
 
@@ -463,9 +549,11 @@ User prompt menyertakan ELO target dan list topik yang dipilih.
 
 - Top: Progress bar + soal-X-dari-N + timer circular (jika aktif)
 - Question card: typography-first, large text (18–20px body)
+- **Source badge** (NEW v2.1): pojok kanan atas card menampilkan tipe soal
 - Options: 5 button vertical, hover state subtle
 - **Confidence slider** sebelum jawab (0–100, gradien dari muted ke gold)
 - Hint button (jika hint mode ON, max 1 per drill, beri konfirmasi)
+- **Lapor button** (NEW v2.1): icon flag kecil bottom-right untuk report soal aneh
 - Tombol Jawab → reveal jawaban + 1 detik animasi check/x
 
 **Inter-question reflection (NEW)** — setelah jawab salah, modal kecil 2 detik:
@@ -515,15 +603,564 @@ Layout: **Single column queue**, bukan kanban. Lebih fokus.
 
 ---
 
-## 10. MODUL 5 — MOCK EXAM (NEW)
+## 10. QUESTION SOURCE STRATEGY (NEW v2.1)
+
+App membedakan **3 sumber soal** dengan trust score berbeda. Routing soal ke modul tergantung use case.
+
+### 10.1 Tiga Tipe Soal
+
+| Tipe | Asal | Trust | Penggunaan |
+|---|---|---|---|
+| **`seed_real`** | Submitted user dari soal SIMAK asli (file `.md`) | **1.0** (gold) | Mock Exam exclusive; sebagian Drill |
+| **`variation`** | Generated Claude dengan seed sebagai anchor + dual-pass validated | **0.85** | Drill Mode mayoritas; SR review |
+| **`pure_llm`** | Generated Claude dari topik saja (tanpa anchor) | **0.60** | Concept Engine pretest/practice; fallback Drill |
+
+### 10.2 Question Object Schema
+
+```typescript
+interface Question {
+  id: string;                    // uuid
+  type: 'seed_real' | 'variation' | 'pure_llm';
+  parentSeedId: string | null;   // hanya untuk variation
+  trustScore: number;            // 0.6 | 0.85 | 1.0
+
+  subject: 'matematika' | 'tpa' | 'bahasa_inggris' | 'bahasa_indonesia';
+  topic: string;
+  difficulty: number;            // ELO 800-1800
+  errorTrap: 'konseptual' | 'komputasi' | 'perangkap' | 'ambiguitas';
+
+  question: string;              // boleh include LaTeX $...$ dan $$...$$
+  options: { A: string, B: string, C: string, D: string, E: string };
+  answer: 'A'|'B'|'C'|'D'|'E';
+  explanation: string;
+  trap?: string;                 // opsional, common mistake explanation
+  hint?: string;                 // opsional, satu baris
+
+  // Metadata source
+  source?: string;               // 'SIMAK_UI_2023' | 'TryoutErlangga2024' (untuk seed_real)
+  year?: number;
+  postedDate?: string;           // ISO, untuk seed_real
+  verifiedByUser?: boolean;      // user explicitly confirmed kunci
+
+  // Metadata variation (jika type === 'variation')
+  variationStrategy?: 'numerical_swap' | 'context_swap' | 'distractor_permute'
+                    | 'inverted_prompt' | 'difficulty_ladder';
+  validatedBy?: 'dual_pass' | 'manual' | 'unvalidated';
+
+  // Quality tracking
+  flagCount: number;             // user reports "soal aneh"
+  flagReasons: string[];         // ['kunci salah', 'soal ambigu', ...]
+  successRate: number | null;    // 0-1, akumulasi accuracy historis user
+  attemptCount: number;
+  lastAttemptDate: string | null;
+}
+```
+
+### 10.3 Routing per Modul
+
+| Modul | Default Mix | Override |
+|---|---|---|
+| **Concept Engine pretest** | 100% pure_llm | Tidak ada |
+| **Concept Engine practice** | 80% variation, 20% pure_llm | Jika tidak ada seed di topik → 100% pure_llm |
+| **Drill Mode** | **10% seed_real + 60% variation + 30% pure_llm** (configurable di Settings) | "Free Choice" mode bisa lock ke salah satu source |
+| **SR Review** | Preserve sumber asli saat item ditambahkan | — |
+| **Mock Exam** | **100% seed_real** | Jika seed bank < N soal yang dibutuhkan, banner peringatan + opsi: cancel atau "isi dengan high-trust variation" |
+
+**Aturan strict Mock Exam:**
+- Mini (20 soal) butuh minimal 20 seed di bank
+- Half (60 soal) butuh minimal 60 seed
+- Full (120 soal) butuh minimal 120 seed
+- Jika kurang, UI menampilkan: "Seed bank kamu masih {N}/{required}. Submit lebih banyak atau pilih ukuran lebih kecil."
+
+### 10.4 UI: Source Badge
+
+Setiap soal yang ditampilkan punya badge kecil di pojok kanan atas:
+
+```
+[Asli · TryoutErlangga 2024]   ← seed_real, gold border
+[Variasi · dari 2026-05-16]    ← variation, muted gold
+[Latihan]                       ← pure_llm, no border
+```
+
+Tooltip on hover menampilkan: trust score, success rate, flag count.
+
+User dapat **disable badge** di Settings untuk distraction-free experience, tapi default ON untuk transparency.
+
+### 10.5 "Report Soal" Feedback Loop
+
+Setiap soal punya tombol kecil "Lapor" (icon flag, low-prominence):
+
+Modal report dengan radio options:
+- Kunci jawaban salah
+- Soal ambigu
+- Pilihan jawaban tidak masuk akal
+- Topic salah klasifikasi
+- Lainnya (free text)
+
+Aksi:
+- Increment `flagCount`
+- Append to `flagReasons`
+- Jika `flagCount >= 3`: auto-disable soal dari rotation, masuk Settings → "Soal Bermasalah" untuk review user
+- Jika tipe `variation` di-flag: opsi "Re-generate dengan strategi berbeda"
+
+---
+
+## 11. MODUL 8 — DAILY SEED (NEW v2.1)
+
+**Komponen:** `<DailySeed />`
+
+Modul ini memungkinkan user menyumbang soal asli SIMAK ke seed bank, dan sistem auto-generate variasi.
+
+### 11.1 Filosofi
+
+> "Satu soal asli mengandung pola yang ribuan soal LLM-only tidak bisa replikasi. Setiap submit = anchor kalibrasi untuk seluruh sistem."
+
+User submit soal **kapanpun mereka punya akses** — tidak ada target harian wajib. Streak dihargai tapi tidak dihukum jika absen.
+
+### 11.2 Layout
+
+Tab di atas modul:
+- **Submit Baru** (default jika belum submit hari ini)
+- **Bank Soal** (browse, edit, delete, flag-resolve)
+- **Variasi** (lihat variasi yang sudah di-generate)
+- **Statistik** (chart distribusi: per subject, per difficulty, growth over time)
+
+### 11.3 Tab "Submit Baru"
+
+Dua mode input:
+
+**Mode A: Paste Markdown** (default)
+- Textarea besar dengan placeholder template
+- Live preview di sebelah kanan (split view)
+- Validation real-time:
+  - YAML frontmatter parsable
+  - Required fields ada
+  - Body sections lengkap (Soal, Pilihan, Kunci, Pembahasan)
+  - Pilihan A-E ada semua
+  - Kunci adalah huruf valid
+- Tombol: "Submit ke Bank" (disabled jika invalid)
+
+**Mode B: File Upload**
+- Drag-drop atau click-to-browse `.md` file
+- Support batch upload (multi-select)
+- Setiap file melalui pipeline yang sama
+- Progress bar untuk batch
+
+### 11.4 Markdown Schema (Spec)
+
+File seed disimpan di repo path `data/seeds/{YYYY-MM-DD}-{subject_code}-{nn}.md`.
+
+**Subject codes:** `mat` (matematika), `tpa`, `eng` (bahasa_inggris), `ind` (bahasa_indonesia).
+
+```markdown
+---
+# WAJIB
+id: 2026-05-16-mat-01
+subject: matematika              # matematika | tpa | bahasa_inggris | bahasa_indonesia
+topic: Logaritma
+source: SIMAK_UI_2023
+date_posted: 2026-05-16
+
+# OPSIONAL
+difficulty: 1350                 # ELO 800-1800; jika kosong, app auto-estimate via Claude
+year: 2023
+verified: true                   # true = user yakin kunci benar
+notes: Soal trap klasik
+---
+
+# Soal
+
+Teks pertanyaan. Boleh LaTeX inline `$x^2$` dan block `$$\\int_0^1 x dx$$`.
+
+# Pilihan
+
+A. opsi pertama
+B. opsi kedua
+C. opsi ketiga
+D. opsi keempat
+E. opsi kelima
+
+# Kunci
+
+C
+
+# Pembahasan
+
+Penjelasan langkah demi langkah.
+
+# Trap
+
+(OPSIONAL) Common mistake explanation.
+```
+
+### 11.5 Markdown Parser
+
+Implementasikan parser sederhana (no library):
+
+```javascript
+function parseSeedMarkdown(rawText) {
+  // 1. Extract YAML frontmatter (between --- ... ---)
+  const fmMatch = rawText.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!fmMatch) throw new Error('Frontmatter tidak ditemukan');
+
+  const frontmatter = parseSimpleYAML(fmMatch[1]);  // built-in mini parser
+  const body = fmMatch[2];
+
+  // 2. Split body by H1 sections
+  const sections = {};
+  const sectionRegex = /^# (Soal|Pilihan|Kunci|Pembahasan|Trap)\s*\n([\s\S]*?)(?=^# |\Z)/gm;
+  let m;
+  while ((m = sectionRegex.exec(body)) !== null) {
+    sections[m[1]] = m[2].trim();
+  }
+
+  // 3. Parse Pilihan ke object {A, B, C, D, E}
+  const optionRegex = /^([A-E])\.\s+(.+)$/gm;
+  const options = {};
+  let om;
+  while ((om = optionRegex.exec(sections.Pilihan)) !== null) {
+    options[om[1]] = om[2].trim();
+  }
+
+  // 4. Validate
+  const required = ['Soal', 'Pilihan', 'Kunci', 'Pembahasan'];
+  for (const s of required) {
+    if (!sections[s]) throw new Error(`Section "${s}" tidak ada`);
+  }
+  if (!['A','B','C','D','E'].every(k => options[k])) {
+    throw new Error('Pilihan A-E tidak lengkap');
+  }
+  if (!['A','B','C','D','E'].includes(sections.Kunci.trim())) {
+    throw new Error('Kunci harus huruf A-E');
+  }
+
+  return {
+    ...frontmatter,
+    type: 'seed_real',
+    trustScore: 1.0,
+    question: sections.Soal,
+    options,
+    answer: sections.Kunci.trim(),
+    explanation: sections.Pembahasan,
+    trap: sections.Trap || null,
+  };
+}
+
+// Mini YAML parser (cukup untuk frontmatter sederhana)
+function parseSimpleYAML(yaml) {
+  const result = {};
+  const lines = yaml.split('\n').filter(l => !l.startsWith('#') && l.trim());
+  for (const line of lines) {
+    const m = line.match(/^(\w+):\s*(.*)$/);
+    if (m) {
+      let val = m[2].trim();
+      // Coerce types
+      if (val === 'true') val = true;
+      else if (val === 'false') val = false;
+      else if (/^\d+$/.test(val)) val = parseInt(val);
+      else if (/^["'].*["']$/.test(val)) val = val.slice(1, -1);
+      result[m[1]] = val;
+    }
+  }
+  return result;
+}
+```
+
+### 11.6 Submit Pipeline
+
+Setelah parse berhasil:
+
+```
+1. PARSE          → Question object dengan type='seed_real'
+2. AUTO-METADATA  → Jika difficulty/topic tidak diisi, Claude extract via prompt
+                    Pattern Extraction (§24)
+3. DUAL-PASS      → Claude solve dari nol (tanpa lihat answer key)
+                    - Match → save langsung, verified=true
+                    - Mismatch → flag, save dengan flagged=true,
+                                 user diminta confirm/edit
+4. SAVE TO DB     → IndexedDB store 'seedBank'
+5. UPDATE STATS   → seedStats.totalSeeds += 1, seedsBySubject++
+6. STREAK         → INCREMENT_SEED_STREAK jika hari pertama submit
+7. AUTO-VARIATE   → Jika preferences.autoVariateOnSubmit:
+                    - Generate 1 variasi (background, non-blocking)
+                    - Strategi: random pick dari 5 strategi (lihat §11.8)
+                    - Validate variasi via dual-pass juga
+                    - Save dengan type='variation', parentSeedId=seedId
+```
+
+UI feedback:
+- Submit success: toast bawah kanan "Seed disimpan. 1 variasi sedang di-generate..."
+- Validation flag: modal "Claude solve berbeda dari kunci. Cek ulang?" dengan diff view
+
+### 11.7 Tab "Bank Soal"
+
+List view dengan filter:
+- Subject (multi-select)
+- Difficulty range slider
+- Verified ON/OFF
+- Search by topic/source
+- Sort: terbaru / terlama / paling sering muncul di mock
+
+Setiap card seed:
+- Truncate question 2 baris
+- Subject + topic + difficulty badge
+- Source label
+- Aksi: View / Edit / Delete / View Variations / Re-validate
+
+**Click "View"** → modal full-detail dengan render LaTeX (gunakan KaTeX inline jika tersedia, fallback monospace).
+
+**Click "Re-validate"** → trigger dual-pass lagi (untuk soal yang user edit manual).
+
+### 11.8 Tab "Variasi"
+
+Tampilan grouped by parentSeed:
+
+```
+─── Seed: 2026-05-16-mat-01 [Logaritma · 1350 ELO] ───
+   ├─ Variation #1 (numerical_swap)    [Generated  | Validated]
+   ├─ Variation #2 (context_swap)      [Generated  | Pending validation]
+   └─ + Generate New Variation
+```
+
+User dapat:
+- Lihat variasi side-by-side dengan seed parent
+- Trigger generate variasi baru (manual, max 5 per seed)
+- Delete variasi yang aneh
+- Pilih strategi variasi specific
+
+**5 Strategi Variasi:**
+
+| Strategi | Cara Kerja | Cocok untuk |
+|---|---|---|
+| `numerical_swap` | Ganti angka, pertahankan struktur logika | Matematika, deret angka |
+| `context_swap` | Ganti tema/konteks, pertahankan struktur soal | TPA verbal, reading comprehension |
+| `distractor_permute` | Tukar/ulik distractor, pertahankan stem | Semua subject |
+| `inverted_prompt` | Balikkan pertanyaan ("manakah yang BUKAN...") | Vocabulary, classification |
+| `difficulty_ladder` | Generate easier (-150 ELO) atau harder (+150 ELO) versi | Calibration assessment |
+
+### 11.9 Tab "Statistik"
+
+Visualisasi:
+- **Pie chart**: distribusi seed per subject
+- **Histogram**: distribusi difficulty (bucket per 100 ELO)
+- **Line chart**: growth seed bank over time (cumulative)
+- **Heatmap**: 30 hari terakhir, hari yang submit highlighted gold
+- **Scoreboard**:
+  - Total seed: N
+  - Total variation: M
+  - Verified rate: X%
+  - Avg flag rate: Y%
+  - Topic coverage matrix (tabel 4x topiklist, cell = jumlah seed)
+
+### 11.10 Seed Streak (Terpisah dari Study Streak)
+
+Logika sama dengan study streak (§5.3) tapi terpisah:
+- Submit minimal 1 soal hari ini → seedStreak += 1
+- Tidak submit → freeze (tidak reset, tidak grow)
+- Reset hanya jika gap > 7 hari (lebih lenient daripada study streak karena akses terbatas)
+
+**Tidak ada visual hukuman absen.** Hanya celebration milestone:
+- 7 days: "Konsistensi terbentuk"
+- 30 days: "Kontributor tetap"
+- 100 days: "Anchor utama bank"
+
+### 11.11 Sync File System ↔ App
+
+App berjalan di browser, jadi tidak punya akses file system langsung. Dua mekanisme:
+
+**A. Manual paste/upload** (default) — user paste konten file `.md` ke Submit form atau drag-drop file.
+
+**B. File System Access API** (Chrome/Edge) — opsional:
+```javascript
+async function pickSeedFolder() {
+  const dirHandle = await window.showDirectoryPicker();
+  // Iterate .md files, parse each, sync ke IndexedDB
+}
+```
+Jika browser support, tampilkan tombol "Pilih folder seeds" di tab Bank. Auto-sync berkala (or pada button click).
+
+**C. Export to file** — dari app ke disk: tombol "Export seed sebagai .md" → download file dengan nama `{id}.md` → user save manual ke folder repo.
+
+---
+
+## 12. VALIDATION PIPELINE (NEW v2.1)
+
+Pipeline yang berjalan saat soal masuk sistem (baik seed_real, variation, atau pure_llm).
+
+### 12.1 Stages
+
+```
+INGESTION → METADATA EXTRACTION → DUAL-PASS SOLVE → QUALITY CHECK → STORAGE
+```
+
+### 12.2 Metadata Extraction
+
+Untuk soal yang missing field (difficulty, topic detail, errorTrap), call Claude dengan prompt:
+
+```
+System: Kamu analyst soal ujian SIMAK UI. Diberi 1 soal lengkap dengan kunci.
+Output JSON STRICT (tidak ada field lain):
+{
+  "topic": string,                    // topik spesifik
+  "subtopic": string,                 // sub-bagian (e.g., "Logaritma natural")
+  "difficulty": int,                  // ELO 800-1800
+  "errorTrap": "konseptual" | "komputasi" | "perangkap" | "ambiguitas",
+  "concepts": [string],               // 1-3 konsep terlibat
+  "estimatedTimeSeconds": int         // estimasi waktu solve siswa rata-rata
+}
+```
+
+### 12.3 Dual-Pass Solve
+
+Critical untuk anti-hallucination:
+
+```javascript
+async function dualPassValidate(question) {
+  // Pass 1: Solve from scratch (NO answer key shown)
+  const solverPrompt = `
+    Solve soal SIMAK UI berikut. Output ONLY JSON:
+    { "answer": "A|B|C|D|E", "confidence": 0-100, "reasoning": "..." }
+
+    SOAL: ${question.question}
+    PILIHAN:
+    A. ${question.options.A}
+    B. ${question.options.B}
+    C. ${question.options.C}
+    D. ${question.options.D}
+    E. ${question.options.E}
+  `;
+
+  const solverResponse = await callClaude([
+    { role: 'user', content: solverPrompt }
+  ], { maxTokens: 1024 });
+
+  const claudeAnswer = parseJSON(solverResponse).answer;
+
+  // Pass 2: Compare
+  if (claudeAnswer === question.answer) {
+    return { validated: true, confidence: 'high' };
+  } else {
+    return {
+      validated: false,
+      confidence: 'mismatch',
+      claudeAnswer,
+      claudeReasoning: parseJSON(solverResponse).reasoning,
+      message: `Claude jawab ${claudeAnswer}, kunci ${question.answer}. Cek ulang.`
+    };
+  }
+}
+```
+
+### 12.4 Quality Check Heuristics
+
+Selain dual-pass, jalankan checks ringan:
+
+| Check | Threshold | Aksi jika gagal |
+|---|---|---|
+| Pilihan unik (no duplicate) | A≠B≠C≠D≠E | Reject, tampilkan error |
+| Panjang stem soal | 10-1500 chars | Warning, tidak block |
+| Panjang opsi reasonable | 1-300 chars/opsi | Warning |
+| Bahasa konsisten (Indo/Inggris) | langdetect ratio | Warning saja |
+| Difficulty out of range | 800-1800 | Cap ke range |
+| LaTeX balanced | `$` count even | Reject, tampilkan error |
+
+### 12.5 Variation Generator
+
+Untuk auto-generate variation:
+
+```javascript
+async function generateVariation(parentSeed, strategy) {
+  const prompt = buildVariationPrompt(parentSeed, strategy);  // §24
+
+  const raw = await callClaude([
+    { role: 'user', content: prompt }
+  ], { maxTokens: 2048, system: VARIATION_SYSTEM_PROMPT });
+
+  let variation = parseJSON(raw);
+  variation.type = 'variation';
+  variation.parentSeedId = parentSeed.id;
+  variation.trustScore = 0.85;
+  variation.variationStrategy = strategy;
+
+  // Run through validation pipeline
+  const dual = await dualPassValidate(variation);
+  variation.validatedBy = dual.validated ? 'dual_pass' : 'unvalidated';
+
+  if (!dual.validated) {
+    // Don't auto-save unvalidated. Either retry or flag for user review.
+    variation.flagCount = 1;
+    variation.flagReasons = ['Dual-pass mismatch'];
+  }
+
+  return variation;
+}
+```
+
+### 12.6 Cost Optimization
+
+Validasi 2-pass = 2x token cost. Strategi mitigasi:
+
+- **Cache seed validation**: validasi seed dilakukan sekali saat submit, hasil disimpan
+- **Batch variation generation**: kalau user request 3 variasi sekaligus, kirim 1 prompt yang generate 3
+- **Lazy variation**: default 1 variasi auto saat submit, sisanya on-demand
+- **Skip dual-pass untuk seed_real verified**: jika user tag `verified: true` dan source jelas, dual-pass jadi optional (tapi tetap recommended)
+- **Use prompt caching**: system prompt validation di-cache (Anthropic ephemeral cache)
+
+---
+
+## 13. MODUL 5 — MOCK EXAM (Locked to Seed Bank, v2.1)
 
 **Komponen:** `<MockExam />`
 
 Simulasi penuh SIMAK UI: tidak ada hint, tidak ada feedback per soal, timer ketat.
+**v2.1 update:** soal eksklusif dari `seed_real` bank — bukan LLM-generated.
+
+### Pre-flight Check (NEW v2.1)
+
+Sebelum setup screen muncul, app cek `seedStats.totalSeeds`:
+
+```
+if (seedStats.totalSeeds < 20) {
+  Tampilkan blocking screen:
+  "Mock Exam butuh minimal 20 soal asli di seed bank.
+   Kamu punya {N} soal saat ini.
+   [Submit soal di Daily Seed] | [Latihan dengan Drill Mode dulu]"
+}
+```
 
 ### Setup
 - Pilih: **Mini (20 soal, 30 min)** | **Half (60 soal, 90 min)** | **Full (120 soal, 180 min)**
+- Tampilkan availability: `"✓ Mini siap (60 seed tersedia)"` atau `"✗ Half belum cukup (60/90 seed)"`
+- Pilih distribusi subject: **Proporsional SIMAK** (default: ~40% mat, 25% TPA, 20% eng, 15% ind) atau **Custom**
+- Toggle: **"Izinkan soal yang pernah muncul di mock sebelumnya"** (default OFF — fresh experience)
 - Konfirmasi modal: "Setelah dimulai, tidak bisa di-pause. Pastikan kondisi siap."
+
+### Soal Selection Algorithm
+
+```javascript
+function selectMockExamQuestions(seedBank, config) {
+  // 1. Filter: hanya seed_real, verified=true atau verifiedByUser=true preferred
+  let pool = seedBank.filter(q => q.type === 'seed_real');
+
+  // 2. Exclude soal yang pernah muncul di mock sebelumnya (jika toggle OFF)
+  if (!config.allowRepeat) {
+    const usedIds = new Set(state.mockExamHistory.flatMap(m => m.questionIds));
+    pool = pool.filter(q => !usedIds.has(q.id));
+  }
+
+  // 3. Stratified sample per subject sesuai distribusi
+  const result = [];
+  for (const [subject, ratio] of Object.entries(config.distribution)) {
+    const targetCount = Math.round(config.totalCount * ratio);
+    const subjectPool = pool.filter(q => q.subject === subject);
+    // Shuffle and take
+    result.push(...shuffle(subjectPool).slice(0, targetCount));
+  }
+
+  // 4. Final shuffle untuk simulate randomized exam order
+  return shuffle(result);
+}
+```
 
 ### Exam Screen
 - **Distraction-free**: sidebar collapse otomatis, focus mode ON
@@ -546,7 +1183,7 @@ History mock exam disimpan, tampilkan trend line (skor naik/turun antar mock).
 
 ---
 
-## 11. MODUL 6 — STUDY PLANNER v2
+## 14. MODUL 6 — STUDY PLANNER v2
 
 **Komponen:** `<StudyPlanner />`
 
@@ -609,7 +1246,7 @@ User prompt menyertakan: tanggal exam, jam/hari tersedia, hasil diagnostic, weak
 
 ---
 
-## 12. MODUL 7 — MISTAKE NOTEBOOK (NEW)
+## 15. MODUL 7 — MISTAKE NOTEBOOK (NEW)
 
 **Komponen:** `<MistakeNotebook />`
 
@@ -649,7 +1286,7 @@ Data mistakes disimpan di **IndexedDB** (database name: `simak_mistakes`, store:
 
 ---
 
-## 13. MODUL 8 — SETTINGS
+## 16. MODUL 9 — SETTINGS
 
 **Komponen:** `<Settings />`
 
@@ -685,7 +1322,7 @@ Tab struktur:
 
 ---
 
-## 14. ONBOARDING FLOW (NEW)
+## 17. ONBOARDING FLOW (NEW)
 
 5 langkah, tidak skippable:
 
@@ -732,7 +1369,7 @@ Otomatis call StudyPlanner generation berdasarkan diagnostic + tanggal ujian. Ta
 
 ---
 
-## 15. DESIGN SYSTEM v2
+## 18. DESIGN SYSTEM v2
 
 ### 15.1 Color Tokens
 
@@ -907,7 +1544,7 @@ const Icon = ({ name, size = 20 }) => {
 
 ---
 
-## 16. FOCUS MODE & POMODORO
+## 19. FOCUS MODE & POMODORO
 
 **Komponen:** `<FocusSession />` (overlay)
 
@@ -927,7 +1564,7 @@ Saat aktif:
 
 ---
 
-## 17. COMMAND PALETTE (Cmd+K)
+## 20. COMMAND PALETTE (Cmd+K)
 
 **Komponen:** `<CommandPalette />`
 
@@ -948,7 +1585,7 @@ Hotkey global. Implementasi: useEffect dengan `keydown` listener, support Cmd/Ct
 
 ---
 
-## 18. UTILITY FUNCTIONS
+## 21. UTILITY FUNCTIONS
 
 ```javascript
 // Tanggal
@@ -1002,7 +1639,7 @@ function generateId() { return crypto.randomUUID(); }
 
 ---
 
-## 19. ERROR HANDLING & RESILIENCE
+## 22. ERROR HANDLING & RESILIENCE
 
 | Skenario | Penanganan |
 |---|---|
@@ -1030,7 +1667,7 @@ Tampilkan tip random saat loading API call:
 
 ---
 
-## 20. STORAGE STRATEGY
+## 23. STORAGE STRATEGY
 
 | Data | Lokasi | Alasan |
 |---|---|---|
@@ -1038,30 +1675,133 @@ Tampilkan tip random saat loading API call:
 | Preferences | localStorage | <1KB |
 | `examDates`, `streak`, `topicMastery` | localStorage | Frequently read, small |
 | `srQueue` | localStorage | <100 items typical |
+| `seedStats` (summary) | localStorage | Frequently read di TodayFlow |
 | `drillHistory` (last 100) | localStorage | Recent, sering diakses |
 | `drillHistory` (older) | IndexedDB | Bisa ribuan |
 | `mistakes` | IndexedDB | Bisa ribuan, sering query/filter |
 | `mockExamHistory` | IndexedDB | Berisi snapshot lengkap |
 | `calibrationLog` | IndexedDB | Time-series data |
+| **`seedBank`** (NEW v2.1) | IndexedDB | Soal asli, foundational data |
+| **`variations`** (NEW v2.1) | IndexedDB | Soal turunan, bisa ribuan |
+| **`seedFlags`** (NEW v2.1) | IndexedDB | Validation issues, audit trail |
 
 IndexedDB schema:
 ```javascript
 const DB_NAME = 'simak_studyos';
-const DB_VERSION = 1;
+const DB_VERSION = 2;  // bumped from 1 for v2.1 schema additions
+
 const STORES = {
-  mistakes: { keyPath: 'id', indexes: ['subject', 'topic', 'mastered', 'timestamp'] },
-  drillHistory: { keyPath: 'id', indexes: ['subject', 'timestamp'] },
-  mockExamHistory: { keyPath: 'id', indexes: ['timestamp'] },
-  calibrationLog: { keyPath: 'id', indexes: ['timestamp', 'subject'] },
+  // ─── v2.0 stores ───
+  mistakes: {
+    keyPath: 'id',
+    indexes: ['subject', 'topic', 'mastered', 'timestamp']
+  },
+  drillHistory: {
+    keyPath: 'id',
+    indexes: ['subject', 'timestamp']
+  },
+  mockExamHistory: {
+    keyPath: 'id',
+    indexes: ['timestamp']
+  },
+  calibrationLog: {
+    keyPath: 'id',
+    indexes: ['timestamp', 'subject']
+  },
+
+  // ─── v2.1 stores (NEW) ───
+  seedBank: {
+    keyPath: 'id',
+    indexes: [
+      'subject',           // filter per subject
+      'topic',             // filter per topic
+      'difficulty',        // ELO range query
+      'date_posted',       // sort terbaru
+      'verified',          // filter verified only
+      'flagCount',         // priority queue untuk review
+      ['subject', 'topic'] // composite untuk drill selection
+    ]
+  },
+  variations: {
+    keyPath: 'id',
+    indexes: [
+      'parentSeedId',      // grouped by seed
+      'subject',
+      'topic',
+      'difficulty',
+      'variationStrategy', // analytics per strategi
+      'validatedBy',       // filter dual_pass only
+      'flagCount'
+    ]
+  },
+  seedFlags: {
+    keyPath: 'id',
+    indexes: [
+      'questionId',        // either seed or variation
+      'reason',            // 'kunci_salah' | 'soal_ambigu' | ...
+      'timestamp',
+      'resolved'           // boolean
+    ]
+  },
 };
 ```
 
-**Export JSON:** dump semua state + IndexedDB data → file (max 10MB realistic).
-**Import JSON:** validate schema, replace IndexedDB stores + dispatch `IMPORT_DATA` ke state.
+### Migration Strategy v2.0 → v2.1
+
+```javascript
+function onUpgradeNeeded(event) {
+  const db = event.target.result;
+  const oldVersion = event.oldVersion;
+
+  // v2.1 additions
+  if (oldVersion < 2) {
+    if (!db.objectStoreNames.contains('seedBank')) {
+      const store = db.createObjectStore('seedBank', { keyPath: 'id' });
+      store.createIndex('subject', 'subject');
+      store.createIndex('topic', 'topic');
+      store.createIndex('difficulty', 'difficulty');
+      store.createIndex('date_posted', 'date_posted');
+      store.createIndex('verified', 'verified');
+      store.createIndex('flagCount', 'flagCount');
+      store.createIndex('subject_topic', ['subject', 'topic']);
+    }
+    if (!db.objectStoreNames.contains('variations')) {
+      const store = db.createObjectStore('variations', { keyPath: 'id' });
+      store.createIndex('parentSeedId', 'parentSeedId');
+      store.createIndex('subject', 'subject');
+      store.createIndex('topic', 'topic');
+      store.createIndex('difficulty', 'difficulty');
+      store.createIndex('variationStrategy', 'variationStrategy');
+      store.createIndex('validatedBy', 'validatedBy');
+      store.createIndex('flagCount', 'flagCount');
+    }
+    if (!db.objectStoreNames.contains('seedFlags')) {
+      const store = db.createObjectStore('seedFlags', { keyPath: 'id' });
+      store.createIndex('questionId', 'questionId');
+      store.createIndex('reason', 'reason');
+      store.createIndex('timestamp', 'timestamp');
+      store.createIndex('resolved', 'resolved');
+    }
+  }
+}
+```
+
+### Capacity Planning
+
+| Store | Estimated avg size/entry | Target capacity | Storage |
+|---|---|---|---|
+| `seedBank` | ~2KB | 500 entries (1MB) | OK |
+| `variations` | ~2KB | 5000 entries (10MB) | Auto-prune oldest unvalidated jika >10MB |
+| `mistakes` | ~3KB (with notes) | 5000 entries (15MB) | Auto-prune mastered terlama |
+| `drillHistory` | ~1KB | 10000 entries (10MB) | Rolling window 10000 |
+| `mockExamHistory` | ~50KB (full snapshot) | 50 mocks (2.5MB) | Keep all, kompresi explanation field jika >limit |
+
+**Export JSON v2.1:** include `seedBank`, `variations`, `seedFlags` di export. **API key tetap excluded.**
+**Import JSON:** validate schema versi, transform jika dari v2.0.
 
 ---
 
-## 21. PROMPT TEMPLATES (Append untuk Claude)
+## 24. PROMPT TEMPLATES (Append untuk Claude)
 
 Semua prompt menggunakan **prompt caching** Anthropic untuk system prompt yang panjang. Header:
 ```
@@ -1091,13 +1831,14 @@ Output JSON only:
 (Lihat §8)
 
 ### Template Diagnostic
-(Lihat §14 Langkah 4)
+(Lihat §17 Langkah 4)
 
 ### Template Mock Exam
 Sama seperti drill batch tapi N besar, distribusi merata 4 subject, no hint, full mix difficulty.
+**v2.1: Mock Exam tidak lagi pakai LLM generation.** Soal di-pull langsung dari `seedBank` (lihat §13).
 
 ### Template Study Plan Generation
-(Lihat §11)
+(Lihat §14)
 
 ### Template Mock Exam Analysis
 ```
@@ -1113,12 +1854,171 @@ Output JSON.
 
 ---
 
-## 22. URUTAN IMPLEMENTASI
+### Template Pattern Extraction (NEW v2.1)
+
+Dipakai saat user submit seed yang missing metadata fields.
+
+```
+System (cache_control: ephemeral):
+Kamu analyst soal SIMAK UI. Tugasmu meng-ekstrak metadata dari soal yang
+diberikan. Output ONLY valid JSON, tidak ada teks lain.
+
+User:
+Analisis soal SIMAK UI berikut dan ekstrak metadata:
+
+SOAL: {question}
+PILIHAN:
+A. {A}
+B. {B}
+C. {C}
+D. {D}
+E. {E}
+KUNCI: {answer}
+PEMBAHASAN: {explanation}
+
+Subject yang sudah diketahui: {subject}
+Topic yang user input (boleh override jika tidak akurat): {topic}
+
+Output JSON STRICT (no markdown wrapper):
+{
+  "topic": "topik spesifik (boleh refine dari input user)",
+  "subtopic": "sub-bagian topik",
+  "difficulty": 800-1800,
+  "errorTrap": "konseptual" | "komputasi" | "perangkap" | "ambiguitas",
+  "concepts": ["konsep 1", "konsep 2"],
+  "estimatedTimeSeconds": 30-300,
+  "patternSignature": "ringkasan struktur soal dalam 1 kalimat"
+}
+```
+
+`patternSignature` digunakan sebagai anchor untuk variation generation — Claude akan diminta meniru pola ini dengan ganti angka/konteks.
+
+---
+
+### Template Solver Validator (Dual-Pass) (NEW v2.1)
+
+Digunakan untuk validasi seed dan variation. **PENTING**: jangan kirim `answer` atau `explanation` ke prompt ini — Claude harus solve from scratch.
+
+```
+System (cache_control: ephemeral):
+Kamu mahasiswa terbaik yang sedang ujian SIMAK UI. Solve soal dengan cermat.
+Output ONLY valid JSON, tidak ada teks lain.
+
+User:
+Solve soal berikut. Pilih SATU jawaban yang paling tepat dari A-E.
+
+SUBJECT: {subject}
+TOPIC: {topic}
+SOAL:
+{question}
+
+PILIHAN:
+A. {A}
+B. {B}
+C. {C}
+D. {D}
+E. {E}
+
+Output JSON STRICT:
+{
+  "answer": "A" | "B" | "C" | "D" | "E",
+  "confidence": 0-100,
+  "reasoning": "langkah singkat menuju jawaban (max 100 kata)",
+  "rejectedDistractors": {
+    "A": "alasan A salah (jika A bukan jawaban)",
+    ...
+  }
+}
+```
+
+Setelah respons:
+1. Parse `answer`
+2. Compare dengan `question.answer` yang asli
+3. Match → `validatedBy = 'dual_pass'`, simpan
+4. Mismatch → flag, simpan dengan `flagCount = 1`, tampilkan ke user untuk konfirmasi
+
+---
+
+### Template Variation Generator (NEW v2.1)
+
+Digunakan untuk generate variasi dari seed parent. Strategi yang dipilih ditentukan oleh `variationStrategy` parameter.
+
+**System prompt** (shared untuk semua strategi):
+```
+System (cache_control: ephemeral):
+Kamu pembuat soal SIMAK UI yang ahli meniru POLA dan KESULITAN dari soal acuan.
+Tugasmu generate 1 soal VARIASI yang strukturnya sama dengan soal acuan,
+dengan modifikasi sesuai strategi yang diminta.
+
+Aturan:
+- Pertahankan tingkat kesulitan (±100 ELO dari acuan, kecuali strategy=difficulty_ladder)
+- Pertahankan jumlah langkah penyelesaian
+- Pertahankan jenis errorTrap
+- Pilihan harus 5 (A-E), distractor plausible
+- Bahasa Indonesia
+- Output ONLY valid JSON
+```
+
+**User prompt per strategy:**
+
+```
+SEED ACUAN:
+- Topic: {topic}
+- Difficulty: {difficulty}
+- Pattern: {patternSignature}
+- Soal: {seed.question}
+- Pilihan: A. {A} ... E. {E}
+- Kunci: {seed.answer}
+- Pembahasan: {seed.explanation}
+
+STRATEGY: {strategy}
+
+INSTRUKSI per strategy:
+[numerical_swap]:    Ganti SEMUA angka dengan angka baru yang sebanding.
+                     Pertahankan struktur kalimat dan logika persis.
+
+[context_swap]:      Ganti tema/konteks (misal: dari "petani" ke "pedagang").
+                     Pertahankan struktur logika dan jumlah variabel.
+
+[distractor_permute]: Pertahankan stem dan kunci, tapi ULIK ulang 4 distractor
+                     supaya jadi lebih menjebak. Distractor harus represent
+                     common student mistakes.
+
+[inverted_prompt]:   Balikkan pertanyaan. Misal "manakah yang BENAR" jadi
+                     "manakah yang TIDAK benar". Sesuaikan kunci.
+
+[difficulty_ladder]: Generate versi {direction} dari seed (direction = "easier"
+                     -150 ELO, atau "harder" +150 ELO). Sesuaikan kompleksitas
+                     komputasi atau langkah.
+
+Output JSON STRICT:
+{
+  "question": "...",
+  "options": { "A": "...", "B": "...", "C": "...", "D": "...", "E": "..." },
+  "answer": "A|B|C|D|E",
+  "explanation": "pembahasan langkah demi langkah",
+  "trap": "common mistake (jika ada)",
+  "difficulty": 800-1800,
+  "errorTrap": "konseptual|komputasi|perangkap|ambiguitas",
+  "modifiedFrom": "ringkasan apa yang diubah dari seed"
+}
+```
+
+**Setelah generation:**
+- Wajib lewat Solver Validator (dual-pass)
+- Save dengan `parentSeedId`, `variationStrategy`, `validatedBy`
+- Jika dual-pass mismatch:
+  - Retry 1x dengan instruksi tambahan: "Variasi sebelumnya gagal validasi. Pastikan kunci jawaban benar dan tidak ambigu."
+  - Jika masih mismatch → save dengan `validatedBy = 'unvalidated'`, `flagCount = 1`
+
+---
+
+## 25. URUTAN IMPLEMENTASI
 
 **Phase 1 — Foundation (Day 1)**
 1. Setup file structure, Context+reducer
 2. CSS tokens & global styles
-3. Storage layer (localStorage + IndexedDB wrapper)
+3. Storage layer (localStorage + IndexedDB wrapper, **schema v2.1**)
 4. AppShell + Sidebar + TopBar
 
 **Phase 2 — Onboarding & Core State (Day 2)**
@@ -1126,30 +2026,38 @@ Output JSON.
 6. Settings module
 7. Theme switching
 
-**Phase 3 — Learning Modules (Day 3–4)**
-8. ConceptEngine (pretest → explain → feynman → practice)
-9. SpacedReview (with quality grading)
-10. DrillMode (with confidence + ELO)
+**Phase 3 — Foundation Data Layer (Day 3) — NEW v2.1**
+8. **DailySeed module** (markdown parser, submit form, bank browse)
+9. **Validation pipeline** (metadata extraction, dual-pass solver)
+10. **Variation generator** (5 strategies, lazy generation)
+11. Seed several example questions to bootstrap testing
 
-**Phase 4 — Advanced (Day 5)**
-11. MockExam
-12. MistakeNotebook
-13. StudyPlanner
+**Phase 4 — Learning Modules (Day 4–5)**
+12. ConceptEngine (pretest → explain → feynman → practice)
+13. SpacedReview (with quality grading)
+14. DrillMode (with confidence + ELO + **hybrid source mix**)
 
-**Phase 5 — Polish (Day 6)**
-14. TodayFlow with mission queue logic
-15. Command palette
-16. Focus session
-17. Microlearning loading states
-18. Error handling refinement
-19. Mobile responsive QA
+**Phase 5 — Advanced (Day 6)**
+15. MockExam (**locked to seedBank** with pre-flight check)
+16. MistakeNotebook
+17. StudyPlanner
+
+**Phase 6 — Polish (Day 7)**
+18. TodayFlow with mission queue logic (include "Submit seed" task)
+19. Command palette
+20. Focus session
+21. Microlearning loading states
+22. Error handling refinement
+23. Mobile responsive QA
+24. Source badge & flag UI polish
 
 ---
 
-## 23. QUALITY CHECKLIST
+## 26. QUALITY CHECKLIST
 
 Sebelum dianggap selesai, verifikasi:
 
+**Core (v2.0):**
 - [ ] Tidak ada emoji di UI selain di body content user-generated (notebook notes)
 - [ ] Semua API call punya loading state, error state, retry
 - [ ] Tab key navigation works untuk semua input/button
@@ -1166,18 +2074,39 @@ Sebelum dianggap selesai, verifikasi:
 - [ ] Mobile bottom tab bar berfungsi
 - [ ] Tanggal ujian configurable dan multiple
 
+**Daily Seed (v2.1):**
+- [ ] Markdown parser handle: valid file, missing field, malformed YAML, missing section
+- [ ] LaTeX (`$...$` dan `$$...$$`) render correct di question/options/explanation
+- [ ] Dual-pass validator panggil Claude **tanpa** kirim answer key
+- [ ] Mismatch dual-pass tampilkan diff view ke user untuk konfirmasi
+- [ ] Variation generator menghasilkan 5 strategi berbeda dengan output valid
+- [ ] Variation auto-generate saat submit jika `autoVariateOnSubmit: true`
+- [ ] Mock Exam pre-flight: tampil banner jika seed bank < threshold
+- [ ] Mock Exam stratified sampling: distribusi proporsional terjaga
+- [ ] Mock Exam tidak repeat soal jika `allowRepeat: false`
+- [ ] Drill Mode default mix: 10/60/30 (seed/variation/pure_llm)
+- [ ] Drill Mode fallback: jika seed/variation kosong, shift ratio gracefully
+- [ ] Source badge tampil di setiap soal (toggle-able di Settings)
+- [ ] Lapor button: increment flagCount, simpan reason, auto-disable jika flagCount ≥ 3
+- [ ] Seed streak terpisah dari study streak, lebih lenient (gap > 7 days = reset)
+- [ ] IndexedDB schema v2 migration dari v1 berjalan tanpa data loss
+- [ ] Export JSON v2.1 include seedBank, variations, seedFlags
+
 ---
 
-## 24. CATATAN PENTING
+## 27. CATATAN PENTING
 
 - **Tetap tidak ada backend.** Semua di browser.
 - API key disimpan di localStorage dengan **explicit warning** di Onboarding & Settings.
-- Soal yang di-generate Claude **DI-CACHE** di IndexedDB (per topic + difficulty bucket) — hemat token, dan bisa di-reuse untuk SR review tanpa API call.
-- Streak: grace day reset Senin 00:00 WIB.
-- App harus fully usable offline kecuali API-dependent features — termasuk review mistakes, lihat plan, browse notebook.
+- Soal pure_llm di-CACHE di IndexedDB (per topic + difficulty bucket) — hemat token.
+- **Seed bank adalah aset paling berharga.** Backup rutin via Export JSON.
+- Streak: grace day reset Senin 00:00 WIB. Seed streak gap-tolerance 7 hari.
+- App harus fully usable offline kecuali API-dependent features — termasuk review mistakes, browse seed bank, lihat plan, browse notebook.
 - **Aksesibilitas:** semua interactive element punya `aria-label`, contrast ratio ≥ 4.5:1, focus-visible jelas, prefers-reduced-motion respected.
+- **Hak cipta soal:** seed bank yang user submit dianggap personal use. Export JSON yang dishare dengan orang lain harus disclaimer "untuk study group personal, bukan distribusi publik."
+- **Kalibrasi sistem:** sistem ELO terkalibrasi via seed_real verified. Semakin banyak seed → ELO estimasi semakin akurat → adaptive difficulty Drill Mode semakin presisi.
 
 ---
 
-*Blueprint v2.0 — SIMAK Study OS*
+*Blueprint v2.1 — SIMAK Study OS*
 *Update Mei 2026. Dirancang untuk dieksekusi Claude Sonnet 4.5+ via Kiro.*

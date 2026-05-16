@@ -1,6 +1,6 @@
-# SIMAK Study OS — Context File v2.0
+# SIMAK Study OS — Context File v2.1
 > File ini dibaca oleh Claude Opus di Kiro sebagai referensi latar belakang proyek.
-> v2.0 (Mei 2026) — disinkronisasi dengan Blueprint v2.0.
+> v2.1 (Mei 2026) — disinkronisasi dengan Blueprint v2.1.
 
 ---
 
@@ -62,17 +62,65 @@ Adaptive ELO per topic. Drill mode target zona 75–85% accuracy (Wilson "85% Ru
 
 ---
 
+## Sumber Soal & Trust System (NEW v2.1)
+
+App membedakan **3 tipe soal** dengan trust score berbeda — bukan semua soal sama kualitasnya.
+
+| Tipe | Asal | Trust | Penggunaan Utama |
+|---|---|---|---|
+| `seed_real` | User submit dari soal SIMAK asli (file `.md`) | 1.0 (gold) | **Mock Exam exclusive** |
+| `variation` | Claude generate dengan seed sebagai anchor + dual-pass validated | 0.85 | Drill Mode mayoritas |
+| `pure_llm` | Claude generate dari topik saja (tanpa anchor) | 0.60 | Pretest, fallback |
+
+**Filosofi:** Soal LLM-only "SIMAK-flavored" tidak benar-benar setara SIMAK asli. Kalibrasi distribusi kesulitan, gaya distractor, dan pola trap **harus** anchored ke soal real. Karena itu user diundang submit soal asli secara berkala (kapanpun ada akses) sebagai foundation calibration.
+
+### Daily Seed Workflow
+
+User membuat file `.md` dengan format YAML frontmatter + H1 sections:
+```
+data/seeds/{YYYY-MM-DD}-{subject_code}-{nn}.md
+```
+
+App memparse, ekstrak metadata via Claude (jika incomplete), lalu **dual-pass validate** — Claude solve dari nol tanpa lihat kunci. Jika match → save sebagai `seed_real`. Jika mismatch → flag, user konfirmasi.
+
+**Auto-variation:** 1 variasi otomatis di-generate saat submit (5 strategi tersedia: numerical_swap, context_swap, distractor_permute, inverted_prompt, difficulty_ladder). Sisanya lazy on-demand saat Drill Mode butuh.
+
+### Mock Exam Lock
+
+Mock Exam **tidak menerima soal LLM-generated** — eksklusif dari seed bank. Pre-flight check:
+- Mini (20 soal) butuh ≥ 20 seed
+- Half (60 soal) butuh ≥ 60 seed
+- Full (120 soal) butuh ≥ 120 seed
+
+Jika kurang, banner blocking + opsi: submit lebih banyak / pilih ukuran lebih kecil / latihan dengan Drill Mode dulu.
+
+### UI Transparency
+
+Setiap soal punya **source badge** kecil (toggle-able):
+- `[Asli · TryoutErlangga 2024]` — gold border
+- `[Variasi · dari 2026-05-16]` — muted gold
+- `[Latihan]` — no border
+
+Tooltip: trust score, success rate, flag count.
+
+### Constraint User: Akses Terbatas
+
+User mungkin tidak bisa submit setiap hari karena keterbatasan akses ke soal asli. **Tidak ada paksaan harian.** Seed streak punya gap-tolerance 7 hari (lebih lenient dari study streak). Submit puluhan sekaligus saat ada akses ✓ tidak submit beberapa hari ✓ — sama-sama OK.
+
+---
+
 ## Modul-Modul App
 
 | Modul | Fungsi |
 |---|---|
 | **TodayFlow** | Entry point. Auto-generate Mission Queue 3–5 task hari ini berdasarkan priorities |
 | **ConceptEngine** | Pretest → Explain (streaming) → Feynman → Practice → SR grading |
-| **DrillMode** | Adaptive batch 10/20/40 soal, ELO-based difficulty, confidence tracking |
+| **DrillMode** | Adaptive batch 10/20/40 soal, ELO-based difficulty, **hybrid source mix** (10% seed / 60% variation / 30% pure_llm) |
 | **SpacedReview** | Queue review SM-2 dengan quality grade 0–5 |
-| **MockExam** | Simulasi penuh 20/60/120 soal, no feedback during, full analytics after |
+| **MockExam** | Simulasi penuh 20/60/120 soal, **eksklusif dari seed bank**, no feedback during, full analytics after |
 | **StudyPlanner** | Plan adaptif 4 minggu, drag-reschedule, adherence tracking |
 | **MistakeNotebook** | Repository semua kesalahan, filter, retry, mark-mastered. IndexedDB. |
+| **DailySeed** (NEW v2.1) | Submit soal asli SIMAK via markdown file, auto-generate variasi, manage bank |
 | **Settings** | API key, theme (3 mode), preferences, export/import JSON |
 
 ---
@@ -83,7 +131,7 @@ Adaptive ELO per topic. Drill mode target zona 75–85% accuracy (Wilson "85% Ru
 - **Tidak ada backend** — tidak ada Express, server, database server.
 - **Persistensi:**
   - localStorage (state ringan, frequently accessed)
-  - **IndexedDB** (mistake notebook, drill history >100, calibration log)
+  - **IndexedDB** (mistake notebook, drill history >100, calibration log, **seedBank, variations, seedFlags v2.1**)
 - **API key dari user** di onboarding. Disimpan di localStorage dengan **explicit privacy warning**.
 - **Model:** `claude-sonnet-4-5-20250929` (atau env var, fallback ke nilai ini).
 - **Streaming wajib** untuk concept explanation (SSE parsing).
@@ -144,6 +192,11 @@ Adaptive ELO per topic. Drill mode target zona 75–85% accuracy (Wilson "85% Ru
 | Mistake notebook >5000 entri | Auto-prune mastered terlama dengan notice |
 | Diagnostic incomplete | Save partial, resume on next open |
 | Streak gap >2 hari | Reset, kecuali grace day belum dipakai |
+| **Seed bank < threshold untuk Mock Exam** (v2.1) | Pre-flight banner block + opsi alternatif |
+| **Markdown parse error** (v2.1) | Tampilkan error spesifik (line number jika bisa), preserve user input untuk retry |
+| **Dual-pass mismatch saat submit seed** (v2.1) | Modal diff view: kunci user vs Claude, user pilih confirm / edit / cancel |
+| **Variation generation gagal validasi** (v2.1) | Retry 1x dengan instruksi tambahan, lalu save sebagai unvalidated dengan flagCount=1 |
+| **Seed file duplicate ID** (v2.1) | Warning, opsi: replace existing / generate new ID / cancel |
 
 ---
 
@@ -184,7 +237,24 @@ Adaptive ELO per topic. Drill mode target zona 75–85% accuracy (Wilson "85% Ru
 
 ## Changelog
 
-### v2.0 (Mei 2026)
+### v2.1 (Mei 2026) — Daily Seed & Source-Aware Routing
+- **Modul baru: DailySeed** — user submit soal asli SIMAK via file `.md` dengan YAML frontmatter
+- **3 tipe soal dengan trust score**: `seed_real` (1.0), `variation` (0.85), `pure_llm` (0.6)
+- **Markdown parser** sederhana untuk format seed (no library)
+- **Validation Pipeline 3-tahap**: Metadata Extraction → Dual-Pass Solver (Claude solve tanpa lihat kunci) → Quality Check
+- **Variation Generator** dengan 5 strategi: numerical_swap, context_swap, distractor_permute, inverted_prompt, difficulty_ladder
+- **Hybrid generation di Drill Mode**: default mix 10% seed + 60% variation + 30% pure_llm (configurable)
+- **Mock Exam locked to seedBank** — pre-flight check, stratified sampling per subject, no-repeat option
+- **Source badge UI** transparan di setiap soal + tooltip detail
+- **"Lapor soal" feedback loop** — auto-disable jika flagCount ≥ 3
+- **Seed streak terpisah** dari study streak, gap-tolerance 7 hari (lebih lenient)
+- **IndexedDB schema v2** — 3 store baru (seedBank, variations, seedFlags) + migration handler
+- **3 prompt template baru**: Pattern Extraction, Solver Validator, Variation Generator
+- **Auto-variate on submit** — 1 variasi background generated saat submit seed
+- **File System Access API** opsional untuk Chrome/Edge sync folder seeds
+- Konflik nomor modul fix: Settings dipindah ke Modul 9, DailySeed jadi Modul 8
+
+### v2.0 (Mei 2026) — Foundational Rebuild
 - Tambah 4 prinsip belajar: Pretesting, Generation Effect, Metacognitive Calibration, Desirable Difficulty
 - Tambah 3 modul: MockExam, MistakeNotebook, dan TodayFlow (replace Dashboard)
 - Tambah Onboarding flow 5-step dengan diagnostic assessment
@@ -203,4 +273,4 @@ Adaptive ELO per topic. Drill mode target zona 75–85% accuracy (Wilson "85% Ru
 
 ---
 
-*Context v2.0 — SIMAK Study OS*
+*Context v2.1 — SIMAK Study OS*
