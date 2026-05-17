@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { isAuthenticated, logout, getToken } from '../lib/authClient';
+import { isAuthenticated, logout, getToken, handleAuthExpired } from '../lib/authClient';
 import { exportAll, importAll } from '../lib/sync';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001';
@@ -71,10 +71,18 @@ function TabAkun() {
 
   useEffect(() => {
     async function fetchAiStatus() {
+      if (!navigator.onLine) {
+        setAiError(true);
+        return;
+      }
       try {
         const res = await fetch(`${BACKEND_URL}/api/ai/status`, {
           headers: { Authorization: `Bearer ${getToken()}` },
         });
+        if (res.status === 401) {
+          handleAuthExpired();
+          return;
+        }
         if (!res.ok) throw new Error('fetch failed');
         const data = await res.json();
         setAiStatus(data.providers);
@@ -232,6 +240,12 @@ function TabPreferensi({ state, dispatch }) {
       otherFields.forEach(k => { current[k] = remaining / otherFields.length; });
     }
 
+    // Guard against NaN and clamp values to [0, 1]
+    Object.keys(current).forEach(k => {
+      if (isNaN(current[k])) current[k] = 0;
+      current[k] = Math.max(0, Math.min(1, current[k]));
+    });
+
     handlePref(current);
   };
 
@@ -381,6 +395,7 @@ function TabData({ dispatch }) {
   };
 
   const handleResetAll = () => {
+    if (resetText !== 'RESET') return;
     if (window.confirm('PERINGATAN: Semua data akan dihapus. Lanjutkan?')) {
       dispatch({ type: 'RESET_ALL' });
       setImportMsg('Semua data berhasil direset');
