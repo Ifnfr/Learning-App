@@ -3,6 +3,7 @@ import TopBar from './TopBar';
 import Sidebar from './Sidebar';
 import TodayFlow from '../modules/TodayFlow';
 import ConceptEngine from '../modules/ConceptEngine';
+import DrillMode from '../modules/DrillMode';
 
 export default function AppShell() {
   const { state } = useApp();
@@ -32,6 +33,8 @@ export default function AppShell() {
             <TodayFlow />
           ) : state.activeModule === 'concept' ? (
             <ConceptEngine />
+          ) : state.activeModule === 'drill' ? (
+            <DrillMode />
           ) : (
             <div
               className="rounded-lg p-6"

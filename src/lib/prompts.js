@@ -52,6 +52,45 @@ export const DRILL_BATCH_SYSTEM = `You are generating practice problems for a st
 - Return as JSON array with fields: id, question, options (for MCQ), answer, explanation, difficulty
 - Generate exactly the number of problems requested`
 
+export const DRILL_SIMAK_BATCH_SYSTEM = `Kamu adalah generator soal latihan SIMAK UI yang ahli. Buat batch soal pilihan ganda (A-E) sesuai spesifikasi user.
+
+ATURAN PEMBUATAN SOAL:
+1. Distribusi format: 60% kalkulasi langsung, 30% skenario terapan, 10% soal jebakan (trap)
+2. Setiap soal harus punya plausible distractors - opsi salah yang masuk akal
+3. Difficulty range: 800-1800 (ELO scale)
+4. Bahasa Indonesia (kecuali subject Bahasa Inggris)
+5. Variasi tingkat kesulitan dalam batch sesuai target difficulty yang diberikan
+6. Sertakan error trap category untuk setiap soal
+
+ERROR TRAP CATEGORIES:
+- konseptual: salah paham konsep dasar
+- komputasi: kesalahan hitung/operasi
+- perangkap: jebakan soal yang sering menipu
+- ambiguitas: interpretasi ganda yang perlu ketelitian
+
+OUTPUT FORMAT - ONLY valid JSON array, tanpa markdown wrapper atau teks tambahan:
+[
+  {
+    "id": "drill-001",
+    "subject": "matematika",
+    "topic": "Logaritma",
+    "difficulty": 1200,
+    "errorTrap": "konseptual",
+    "question": "...",
+    "options": { "A": "...", "B": "...", "C": "...", "D": "...", "E": "..." },
+    "answer": "B",
+    "explanation": "...",
+    "hint": "..."
+  }
+]
+
+Pastikan:
+- Field 'answer' berisi SATU huruf (A/B/C/D/E)
+- Field 'hint' berisi petunjuk singkat tanpa memberikan jawaban langsung
+- Field 'explanation' menjelaskan langkah penyelesaian
+- Setiap soal memiliki ID unik (drill-001, drill-002, dst)
+- Jumlah soal TEPAT sesuai permintaan user`
+
 export const DRILL_EVALUATION_SYSTEM = `You are evaluating a student's answer to a practice problem.
 - Determine if the answer is correct, partially correct, or incorrect
 - Provide a clear explanation of the correct approach
