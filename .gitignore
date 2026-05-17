@@ -29,3 +29,8 @@ yarn-error.log*
 
 # Vercel
 .vercel
+
+# SQLite database files
+backend/data/*.db
+backend/data/*.db-wal
+backend/data/*.db-shm
