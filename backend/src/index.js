@@ -4,6 +4,7 @@ import config from './config.js';
 import { initDB } from './db/database.js';
 import authRoutes from './routes/auth.js';
 import aiRoutes from './routes/ai.js';
+import aiStatusRoutes from './routes/aiStatus.js';
 import dataRoutes from './routes/data.js';
 import { verifyToken } from './middleware/auth.js';
 import { rateLimit } from './middleware/rateLimit.js';
@@ -21,6 +22,7 @@ app.use(express.json({ limit: '10mb' }));
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/ai/status', verifyToken, aiStatusRoutes);
 app.use('/api/ai', verifyToken, rateLimit, aiRoutes);
 app.use('/api', verifyToken, dataRoutes);
 
