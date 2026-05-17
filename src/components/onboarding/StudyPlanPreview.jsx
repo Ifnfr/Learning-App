@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { callClaude } from '../../lib/api';
 import { STUDY_PLAN_SYSTEM } from '../../lib/prompts';
+import { parseJSONSafe } from '../../lib/parseJSON';
 
 const LOADING_TIPS = [
   'AI sedang menyusun rencana belajar yang dipersonalisasi untukmu.',
@@ -31,19 +32,21 @@ export default function StudyPlanPreview({ onNext }) {
     setLoading(true);
     setError(null);
     try {
+      const examDate = state.examDates[0]?.date || 'Tanggal ujian belum ditentukan';
+      const examName = state.examDates[0]?.name || 'SIMAK UI';
       const response = await callClaude({
         apiKey: state.apiKey,
         system: STUDY_PLAN_SYSTEM,
         messages: [
           {
             role: 'user',
-            content: `Hasil diagnostic: ${JSON.stringify(state.diagnosticResults)}. Tanggal ujian: ${state.examDates[0]?.date}. Nama ujian: ${state.examDates[0]?.name}. Buat jadwal belajar minggu pertama.`,
+            content: `Hasil diagnostic: ${JSON.stringify(state.diagnosticResults)}. Tanggal ujian: ${examDate}. Nama ujian: ${examName}. Buat jadwal belajar minggu pertama.`,
           },
         ],
         maxTokens: 2048,
         temperature: 0.7,
       });
-      const parsed = JSON.parse(response);
+      const parsed = parseJSONSafe(response);
       setPlan(parsed);
       setLoading(false);
     } catch (err) {

@@ -70,7 +70,7 @@ const initialState = {
 const PERSIST_FIELDS = [
   'onboarded', 'apiKey', 'examDates', 'primaryExamId',
   'activeModule', 'focusMode', 'theme', 'sidebarCollapsed',
-  'topicMastery', 'streak', 'lastStudyDate', 'graceDayUsed',
+  'diagnosticResults', 'topicMastery', 'streak', 'lastStudyDate', 'graceDayUsed',
   'srQueue', 'preferences', 'seedStats',
 ];
 

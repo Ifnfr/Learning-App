@@ -112,63 +112,79 @@ export async function callClaudeStream({
     throw new Error('API key is required')
   }
 
-  const response = await fetch(API_URL, {
-    method: 'POST',
-    headers: getHeaders(apiKey),
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      temperature,
-      system,
-      messages,
-      stream: true,
-    }),
-  })
+  const retryDelays = [1000, 2000, 4000]
+  let lastError = null
 
-  if (!response.ok) {
-    const errorBody = await response.text()
-    throw new Error(`Claude API error (${response.status}): ${errorBody}`)
-  }
+  for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: getHeaders(apiKey),
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        temperature,
+        system,
+        messages,
+        stream: true,
+      }),
+    })
 
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let accumulated = ''
-  let buffer = ''
+    if (response.status === 429 && attempt < retryDelays.length) {
+      await sleep(retryDelays[attempt])
+      continue
+    }
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
+    if (!response.ok) {
+      const errorBody = await response.text()
+      lastError = new Error(`Claude API error (${response.status}): ${errorBody}`)
+      if (response.status === 429) {
+        throw lastError
+      }
+      throw lastError
+    }
 
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() || ''
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let accumulated = ''
+    let buffer = ''
 
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const jsonStr = line.slice(6)
-        if (jsonStr.trim() === '[DONE]') continue
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
 
-        try {
-          const event = JSON.parse(jsonStr)
-          if (
-            event.type === 'content_block_delta' &&
-            event.delta &&
-            event.delta.type === 'text_delta'
-          ) {
-            const text = event.delta.text
-            accumulated += text
-            if (onChunk) {
-              onChunk(text)
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const jsonStr = line.slice(6)
+          if (jsonStr.trim() === '[DONE]') continue
+
+          try {
+            const event = JSON.parse(jsonStr)
+            if (
+              event.type === 'content_block_delta' &&
+              event.delta &&
+              event.delta.type === 'text_delta'
+            ) {
+              const text = event.delta.text
+              accumulated += text
+              if (onChunk) {
+                onChunk(text)
+              }
             }
+          } catch {
+            // Skip malformed JSON lines
           }
-        } catch {
-          // Skip malformed JSON lines
         }
       }
     }
+
+    return accumulated
   }
 
-  return accumulated
+  throw lastError
 }
 
 /**

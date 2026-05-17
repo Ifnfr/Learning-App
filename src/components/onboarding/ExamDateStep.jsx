@@ -11,16 +11,18 @@ export default function ExamDateStep({ onNext }) {
 
   let daysRemaining = null;
   let dateInPast = false;
+  let dateIsToday = false;
 
   if (examDate) {
     const target = new Date(examDate + 'T00:00:00');
     const diffMs = target - today;
     daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
     dateInPast = daysRemaining < 0;
+    dateIsToday = daysRemaining === 0;
   }
 
   function handleSubmit() {
-    if (!examDate || dateInPast) return;
+    if (!examDate || dateInPast || dateIsToday) return;
     const id = crypto.randomUUID();
     const name = examName.trim() || 'SIMAK UI';
     dispatch({ type: 'ADD_EXAM_DATE', payload: { id, name, date: examDate } });
@@ -56,13 +58,18 @@ export default function ExamDateStep({ onNext }) {
               className="w-full px-4 py-3 rounded-lg outline-none"
               style={{
                 background: 'var(--bg-elevated)',
-                border: `1px solid ${dateInPast ? 'var(--rust)' : 'var(--border)'}`,
+                border: `1px solid ${dateInPast || dateIsToday ? 'var(--rust)' : 'var(--border)'}`,
                 color: 'var(--text)',
               }}
             />
             {dateInPast && (
               <p className="mt-1 text-sm" style={{ color: 'var(--rust)' }}>
                 Tanggal sudah berlalu. Pilih tanggal di masa depan.
+              </p>
+            )}
+            {dateIsToday && (
+              <p className="mt-1 text-sm" style={{ color: 'var(--rust)' }}>
+                Ujian hari ini tidak memungkinkan pembuatan jadwal belajar. Pilih tanggal di masa depan.
               </p>
             )}
           </div>
@@ -86,7 +93,7 @@ export default function ExamDateStep({ onNext }) {
           </div>
         </div>
 
-        {daysRemaining !== null && !dateInPast && (
+        {daysRemaining !== null && !dateInPast && !dateIsToday && (
           <div
             className="rounded-lg p-4 mb-6 text-center"
             style={{
@@ -105,7 +112,7 @@ export default function ExamDateStep({ onNext }) {
 
         <button
           onClick={handleSubmit}
-          disabled={!examDate || dateInPast}
+          disabled={!examDate || dateInPast || dateIsToday}
           className="w-full py-3 px-6 rounded-lg font-semibold cursor-pointer transition-opacity hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
           style={{
             background: 'var(--gold)',

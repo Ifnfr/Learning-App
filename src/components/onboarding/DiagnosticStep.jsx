@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { callClaude } from '../../lib/api';
 import { DIAGNOSTIC_SYSTEM } from '../../lib/prompts';
+import { parseJSONSafe } from '../../lib/parseJSON';
 
 const LOADING_TIPS = [
   'Tahukah kamu? Testing diri sendiri meningkatkan retensi 50% dibanding membaca ulang.',
@@ -24,6 +25,8 @@ export default function DiagnosticStep({ onNext }) {
   }, []);
 
   async function fetchQuestions() {
+    setAnswers([]);
+    setCurrentQ(0);
     setLoading(true);
     setError(null);
     try {
@@ -34,7 +37,7 @@ export default function DiagnosticStep({ onNext }) {
         maxTokens: 4096,
         temperature: 0.7,
       });
-      const parsed = JSON.parse(response);
+      const parsed = parseJSONSafe(response);
       setQuestions(parsed);
       setLoading(false);
     } catch (err) {
