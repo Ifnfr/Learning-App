@@ -2,6 +2,7 @@ import { useApp } from '../context/AppContext';
 import TopBar from './TopBar';
 import Sidebar from './Sidebar';
 import TodayFlow from '../modules/TodayFlow';
+import ConceptEngine from '../modules/ConceptEngine';
 
 export default function AppShell() {
   const { state } = useApp();
@@ -29,6 +30,8 @@ export default function AppShell() {
         <div className="max-w-[960px] mx-auto px-4 sm:px-8 py-8">
           {state.activeModule === 'today' ? (
             <TodayFlow />
+          ) : state.activeModule === 'concept' ? (
+            <ConceptEngine />
           ) : (
             <div
               className="rounded-lg p-6"
