@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+:root {
+  /* Backgrounds — warm dark palette */
+  --bg: #0d0c0b;
+  --bg-elevated: #181614;
+  --bg-card: #1f1c19;
+  --bg-hover: #26221e;
+
+  /* Borders */
+  --border: #2a2622;
+  --border-strong: #3d3833;
+
+  /* Text */
+  --text: #ece4d4;
+  --text-muted: #a89e8e;
+  --text-faint: #6c655b;
+
+  /* Accent — gold */
+  --gold: #c9a84c;
+  --gold-soft: #8a6f2e;
+  --gold-bg: rgba(201, 168, 76, 0.08);
+
+  /* Semantic */
+  --ink: #1c2541;
+  --moss: #4a7c59;
+  --rust: #8b3a3a;
+  --amber: #b87333;
+
+  /* Subject colors */
+  --subj-mat: #6688a8;
+  --subj-tpa: #8b6f9b;
+  --subj-eng: #5a8e8e;
+  --subj-ind: #b8956a;
+
+  /* Typography */
+  --font-display: 'Playfair Display', Georgia, serif;
+  --font-body: 'Source Serif 4', Georgia, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Scale */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.5rem;
+  --text-2xl: 2rem;
+  --text-3xl: 2.625rem;
+  --text-4xl: 4rem;
+
+  --leading-tight: 1.2;
+  --leading-normal: 1.6;
+}
+
+[data-theme="academic-light"] {
+  --bg: #f5efe3;
+  --bg-elevated: #ebe3d3;
+  --bg-card: #ffffff;
+  --bg-hover: #e0d8c8;
+  --border: #d4cbbe;
+  --border-strong: #b8ad9e;
+  --text: #1a1715;
+  --text-muted: #5c554c;
+  --text-faint: #8a8278;
+  --gold: #9a7b2e;
+  --gold-soft: #c9a84c;
+  --gold-bg: rgba(154, 123, 46, 0.08);
+}
+
+[data-theme="parchment"] {
+  --bg: #e8dec5;
+  --bg-elevated: #ddd3b8;
+  --bg-card: #f0e7d0;
+  --bg-hover: #d4c9ae;
+  --border: #c4b89a;
+  --border-strong: #a89978;
+  --text: #2b2419;
+  --text-muted: #5c5240;
+  --text-faint: #7a6e5a;
+  --gold: #8a6f2e;
+  --gold-soft: #c9a84c;
+  --gold-bg: rgba(138, 111, 46, 0.10);
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  line-height: var(--leading-normal);
+}
