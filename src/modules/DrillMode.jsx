@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
-import { callClaude } from '../lib/api';
+import { callAI } from '../lib/api';
 import { parseJSONSafe } from '../lib/parseJSON';
 import { updateElo, brierScore } from '../lib/algorithms';
 import { DRILL_SIMAK_BATCH_SYSTEM } from '../lib/prompts';
@@ -325,8 +325,8 @@ function SetupScreen({ config, setConfig, state, onStart, loading, setLoading, e
       // Scale maxTokens based on question count
       const maxTokens = config.questionCount <= 10 ? 2048 : config.questionCount <= 20 ? 4096 : 8192;
 
-      const raw = await callClaude({
-        apiKey: state.apiKey,
+      const raw = await callAI({
+        task: 'drill_batch',
         system: DRILL_SIMAK_BATCH_SYSTEM,
         messages: [{ role: 'user', content: userPrompt }],
         maxTokens,

@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import WelcomeStep from './WelcomeStep';
-import ApiKeyStep from './ApiKeyStep';
 import ExamDateStep from './ExamDateStep';
 import DiagnosticStep from './DiagnosticStep';
 import StudyPlanPreview from './StudyPlanPreview';
 
-const TOTAL_STEPS = 5;
+const TOTAL_STEPS = 4;
 
 export default function OnboardingFlow() {
   const [currentStep, setCurrentStep] = useState(0);
@@ -16,7 +15,6 @@ export default function OnboardingFlow() {
 
   const steps = [
     <WelcomeStep key="welcome" onNext={handleNext} />,
-    <ApiKeyStep key="apikey" onNext={handleNext} />,
     <ExamDateStep key="examdate" onNext={handleNext} />,
     <DiagnosticStep key="diagnostic" onNext={handleNext} />,
     <StudyPlanPreview key="studyplan" onNext={handleNext} />,

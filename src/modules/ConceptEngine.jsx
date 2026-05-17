@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
-import { callClaude, callClaudeStream } from '../lib/api';
+import { callAI, callAIStream } from '../lib/api';
 import { parseJSONSafe } from '../lib/parseJSON';
 import { calculateNextReview, updateElo } from '../lib/algorithms';
 import {
@@ -177,7 +177,6 @@ export default function ConceptEngine() {
       <PretestStep
         subject={selectedSubject}
         topic={selectedTopic}
-        apiKey={state.apiKey}
         loading={loading}
         setLoading={setLoading}
         error={error}
@@ -199,7 +198,6 @@ export default function ConceptEngine() {
       <ExplainStep
         subject={selectedSubject}
         topic={selectedTopic}
-        apiKey={state.apiKey}
         explainText={explainText}
         setExplainText={setExplainText}
         showSkip={showSkip}
@@ -219,7 +217,6 @@ export default function ConceptEngine() {
       <FeynmanStep
         subject={selectedSubject}
         topic={selectedTopic}
-        apiKey={state.apiKey}
         loading={loading}
         setLoading={setLoading}
         error={error}
@@ -250,7 +247,6 @@ export default function ConceptEngine() {
       <PracticeStep
         subject={selectedSubject}
         topic={selectedTopic}
-        apiKey={state.apiKey}
         state={state}
         dispatch={dispatch}
         loading={loading}
@@ -295,7 +291,7 @@ export default function ConceptEngine() {
 
 // ─── Pretest Step ─────────────────────────────────────────────────────────────
 function PretestStep({
-  subject, topic, apiKey, loading, setLoading, error, setError,
+  subject, topic, loading, setLoading, error, setError,
   pretestData, setPretestData, pretestAnswer, setPretestAnswer,
   pretestConfidence, setPretestConfidence, onNext,
 }) {
@@ -312,8 +308,8 @@ function PretestStep({
     setLoading(true);
     setError(null);
     try {
-      const raw = await callClaude({
-        apiKey,
+      const raw = await callAI({
+        task: 'pretest',
         system: CONCEPT_PRETEST_SYSTEM,
         messages: [{ role: 'user', content: `Topic: "${topic}", Subject: "${subject}".` }],
         maxTokens: 1024,
@@ -419,7 +415,7 @@ function PretestStep({
 
 // ─── Explain Step (Streaming) ─────────────────────────────────────────────────
 function ExplainStep({
-  subject, topic, apiKey, explainText, setExplainText,
+  subject, topic, explainText, setExplainText,
   showSkip, setShowSkip, streamDone, setStreamDone, abortRef, explainAttempt, onNext,
 }) {
   const started = useRef(false);
@@ -444,8 +440,8 @@ function ExplainStep({
       const extraInstruction = explainAttempt > 0
         ? ' Gunakan analogi yang berbeda dari sebelumnya.'
         : '';
-      await callClaudeStream({
-        apiKey,
+      await callAIStream({
+        task: 'explanation',
         system: CONCEPT_EXPLANATION_SYSTEM,
         messages: [{ role: 'user', content: `Topic: "${topic}", Subject: "${subject}".${extraInstruction}` }],
         maxTokens: 1024,
@@ -524,7 +520,7 @@ function ExplainStep({
 
 // ─── Feynman Step ─────────────────────────────────────────────────────────────
 function FeynmanStep({
-  subject, topic, apiKey, loading, setLoading, error, setError,
+  subject, topic, loading, setLoading, error, setError,
   feynmanText, setFeynmanText, feynmanResult, setFeynmanResult,
   onRetryExplain, onRetryFeynman, onNext,
 }) {
@@ -554,8 +550,8 @@ function FeynmanStep({
     setLoading(true);
     setError(null);
     try {
-      const raw = await callClaude({
-        apiKey,
+      const raw = await callAI({
+        task: 'feynman_eval',
         system: FEYNMAN_EVALUATION_SYSTEM,
         messages: [{
           role: 'user',
@@ -715,7 +711,7 @@ function FeynmanStep({
 
 // ─── Practice Step ────────────────────────────────────────────────────────────
 function PracticeStep({
-  subject, topic, apiKey, state, dispatch, loading, setLoading, error, setError,
+  subject, topic, state, dispatch, loading, setLoading, error, setError,
   practiceData, setPracticeData, practiceAnswer, setPracticeAnswer,
   practiceConfidence, setPracticeConfidence, practiceRevealed, setPracticeRevealed,
   pretestData, pretestAnswer, pretestConfidence, onNext,
@@ -733,8 +729,8 @@ function PracticeStep({
     setLoading(true);
     setError(null);
     try {
-      const raw = await callClaude({
-        apiKey,
+      const raw = await callAI({
+        task: 'practice',
         system: CONCEPT_PRACTICE_SYSTEM,
         messages: [{ role: 'user', content: `Topic: "${topic}", Subject: "${subject}".` }],
         maxTokens: 1024,

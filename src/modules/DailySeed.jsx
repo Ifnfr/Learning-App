@@ -131,7 +131,6 @@ function SubmitTab({ state, dispatch }) {
     try {
       const pipelineResult = await runSubmitPipeline(
         markdown,
-        state.apiKey,
         dispatch,
         { autoVariate: state.preferences.autoVariateOnSubmit }
       );
@@ -181,7 +180,7 @@ function SubmitTab({ state, dispatch }) {
         f.name === newFiles[i].name ? { ...f, status: 'processing' } : f
       ));
       try {
-        const res = await runSubmitPipeline(text, state.apiKey, dispatch, { autoVariate: state.preferences.autoVariateOnSubmit });
+        const res = await runSubmitPipeline(text, dispatch, { autoVariate: state.preferences.autoVariateOnSubmit });
         if (res.success) {
           if (state.seedStats.lastSeedDate !== today) {
             dispatch({ type: 'INCREMENT_SEED_STREAK' });
@@ -475,10 +474,9 @@ function BankTab({ state, dispatch, setActiveTab }) {
   }
 
   async function handleRevalidate(seed) {
-    if (!state.apiKey) return;
     setRevalidating(seed.id);
     try {
-      const result = await dualPassValidate(seed, state.apiKey);
+      const result = await dualPassValidate(seed);
       const updated = { ...seed, verified: result.verified };
       if (result.mismatch) updated.flagCount = (updated.flagCount || 0) + 1;
       await saveToIDB('seedBank', updated);
@@ -719,11 +717,11 @@ function VariasiTab({ state, dispatch }) {
 
   async function handleGenerate(seedId, strategy) {
     const seed = seeds.find(s => s.id === seedId);
-    if (!seed || !state.apiKey) return;
+    if (!seed) return;
     setGenerating(seedId);
     setShowStrategyPicker(null);
     try {
-      const variation = await generateVariation(seed, strategy, state.apiKey);
+      const variation = await generateVariation(seed, strategy);
       await saveToIDB('variations', variation);
       dispatch({ type: 'ADD_VARIATION' });
       setVariations(prev => [...prev, variation]);

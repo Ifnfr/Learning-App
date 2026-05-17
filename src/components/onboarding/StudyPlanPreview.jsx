@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
-import { callClaude } from '../../lib/api';
+import { callAI } from '../../lib/api';
 import { STUDY_PLAN_SYSTEM } from '../../lib/prompts';
 import { parseJSONSafe } from '../../lib/parseJSON';
 
@@ -34,8 +34,8 @@ export default function StudyPlanPreview({ onNext }) {
     try {
       const examDate = state.examDates[0]?.date || 'Tanggal ujian belum ditentukan';
       const examName = state.examDates[0]?.name || 'SIMAK UI';
-      const response = await callClaude({
-        apiKey: state.apiKey,
+      const response = await callAI({
+        task: 'study_plan',
         system: STUDY_PLAN_SYSTEM,
         messages: [
           {

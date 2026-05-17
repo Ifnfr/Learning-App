@@ -1,17 +1,17 @@
 /**
- * Claude API wrapper for SIMAK Study OS.
- * Supports non-streaming, streaming (SSE), and API key verification.
+ * API client for SIMAK Study OS.
+ * Communicates with the backend proxy for AI operations.
  */
 
-const API_URL = 'https://api.anthropic.com/v1/messages'
-const DEFAULT_MODEL = 'claude-sonnet-4-5-20250929'
+import { getToken } from './authClient'
 
-function getHeaders(apiKey) {
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001'
+
+function getAuthHeaders() {
+  const token = getToken()
   return {
     'Content-Type': 'application/json',
-    'x-api-key': apiKey,
-    'anthropic-version': '2023-06-01',
-    'anthropic-dangerous-direct-browser-access': 'true',
+    'Authorization': `Bearer ${token}`,
   }
 }
 
@@ -20,44 +20,38 @@ function sleep(ms) {
 }
 
 /**
- * Call Claude API (non-streaming) with exponential backoff retry for 429 errors.
+ * Call AI via backend proxy (non-streaming) with exponential backoff retry for 429 errors.
  *
  * @param {object} options
- * @param {string} options.apiKey - Anthropic API key
- * @param {string} options.system - System prompt defining Claude's behavior
+ * @param {string} options.task - Task type for provider routing (e.g. 'pretest', 'explanation')
+ * @param {string} options.system - System prompt
  * @param {Array} options.messages - Array of { role, content } message objects
- * @param {string} [options.model] - Model to use (default: claude-sonnet-4-5-20250929)
  * @param {number} [options.maxTokens] - Maximum response tokens (default: 1024)
  * @param {number} [options.temperature] - Sampling temperature (default: 0.7)
  * @param {AbortSignal} [options.signal] - Optional AbortSignal to cancel the fetch
- * @returns {Promise<string>} Claude's response text
+ * @returns {Promise<string>} AI response text
  */
-export async function callClaude({
-  apiKey,
+export async function callAI({
+  task,
   system,
   messages,
-  model = DEFAULT_MODEL,
   maxTokens = 1024,
   temperature = 0.7,
   signal,
 }) {
-  if (!apiKey) {
-    throw new Error('API key is required')
-  }
-
   const retryDelays = [1000, 2000, 4000]
   let lastError = null
 
   for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
-    const response = await fetch(API_URL, {
+    const response = await fetch(`${BACKEND_URL}/api/ai/generate`, {
       method: 'POST',
-      headers: getHeaders(apiKey),
+      headers: getAuthHeaders(),
       body: JSON.stringify({
-        model,
-        max_tokens: maxTokens,
-        temperature,
+        task,
         system,
         messages,
+        maxTokens,
+        temperature,
       }),
       signal,
     })
@@ -67,9 +61,15 @@ export async function callClaude({
       continue
     }
 
+    if (response.status === 401) {
+      const err = new Error('Sesi telah berakhir. Silakan login ulang.')
+      err.code = 'UNAUTHORIZED'
+      throw err
+    }
+
     if (!response.ok) {
       const errorBody = await response.text()
-      lastError = new Error(`Claude API error (${response.status}): ${errorBody}`)
+      lastError = new Error(`API error (${response.status}): ${errorBody}`)
       if (response.status === 429) {
         throw lastError
       }
@@ -77,60 +77,47 @@ export async function callClaude({
     }
 
     const data = await response.json()
-
-    if (data.content && data.content.length > 0) {
-      return data.content[0].text
-    }
-
-    throw new Error('Unexpected API response format: no content returned')
+    return data.text
   }
 
   throw lastError
 }
 
 /**
- * Call Claude API with streaming via SSE.
- * Parses the event stream for content_block_delta events with text_delta type.
+ * Call AI via backend proxy with streaming (SSE).
  *
  * @param {object} options
- * @param {string} options.apiKey - Anthropic API key
- * @param {string} options.system - System prompt defining Claude's behavior
+ * @param {string} options.task - Task type for provider routing
+ * @param {string} options.system - System prompt
  * @param {Array} options.messages - Array of { role, content } message objects
- * @param {string} [options.model] - Model to use (default: claude-sonnet-4-5-20250929)
  * @param {number} [options.maxTokens] - Maximum response tokens (default: 1024)
  * @param {number} [options.temperature] - Sampling temperature (default: 0.7)
- * @param {function} options.onChunk - Callback invoked with each text delta string
+ * @param {function} options.onChunk - Callback invoked with each text chunk
  * @param {AbortSignal} [options.signal] - Optional AbortSignal to cancel the fetch
  * @returns {Promise<string>} Full accumulated response text
  */
-export async function callClaudeStream({
-  apiKey,
+export async function callAIStream({
+  task,
   system,
   messages,
-  model = DEFAULT_MODEL,
   maxTokens = 1024,
   temperature = 0.7,
   onChunk,
   signal,
 }) {
-  if (!apiKey) {
-    throw new Error('API key is required')
-  }
-
   const retryDelays = [1000, 2000, 4000]
   let lastError = null
 
   for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
-    const response = await fetch(API_URL, {
+    const response = await fetch(`${BACKEND_URL}/api/ai/stream`, {
       method: 'POST',
-      headers: getHeaders(apiKey),
+      headers: getAuthHeaders(),
       body: JSON.stringify({
-        model,
-        max_tokens: maxTokens,
-        temperature,
+        task,
         system,
         messages,
-        stream: true,
+        maxTokens,
+        temperature,
       }),
       signal,
     })
@@ -140,9 +127,15 @@ export async function callClaudeStream({
       continue
     }
 
+    if (response.status === 401) {
+      const err = new Error('Sesi telah berakhir. Silakan login ulang.')
+      err.code = 'UNAUTHORIZED'
+      throw err
+    }
+
     if (!response.ok) {
       const errorBody = await response.text()
-      lastError = new Error(`Claude API error (${response.status}): ${errorBody}`)
+      lastError = new Error(`API error (${response.status}): ${errorBody}`)
       if (response.status === 429) {
         throw lastError
       }
@@ -169,15 +162,10 @@ export async function callClaudeStream({
 
           try {
             const event = JSON.parse(jsonStr)
-            if (
-              event.type === 'content_block_delta' &&
-              event.delta &&
-              event.delta.type === 'text_delta'
-            ) {
-              const text = event.delta.text
-              accumulated += text
+            if (event.text) {
+              accumulated += event.text
               if (onChunk) {
-                onChunk(text)
+                onChunk(event.text)
               }
             }
           } catch {
@@ -194,25 +182,32 @@ export async function callClaudeStream({
 }
 
 /**
- * Verify that an API key is valid by making a minimal API call.
+ * Call AI validation endpoint for dual-pass question validation.
  *
- * @param {string} apiKey - Anthropic API key to verify
- * @returns {Promise<{valid: boolean, error: string|null}>}
+ * @param {object} options
+ * @param {string} options.question - The question text
+ * @param {object} options.options - Answer options object
+ * @param {AbortSignal} [options.signal] - Optional AbortSignal
+ * @returns {Promise<{answer: string, confidence: number, reasoning: string}>}
  */
-export async function verifyApiKey(apiKey) {
-  if (!apiKey) {
-    return { valid: false, error: 'API key is required' }
+export async function callValidate({ question, options, signal }) {
+  const response = await fetch(`${BACKEND_URL}/api/ai/validate`, {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ question, options }),
+    signal,
+  })
+
+  if (response.status === 401) {
+    const err = new Error('Sesi telah berakhir. Silakan login ulang.')
+    err.code = 'UNAUTHORIZED'
+    throw err
   }
 
-  try {
-    await callClaude({
-      apiKey,
-      system: 'Reply with OK',
-      messages: [{ role: 'user', content: 'test' }],
-      maxTokens: 10,
-    })
-    return { valid: true, error: null }
-  } catch (err) {
-    return { valid: false, error: err.message }
+  if (!response.ok) {
+    const errorBody = await response.text()
+    throw new Error(`Validation API error (${response.status}): ${errorBody}`)
   }
+
+  return await response.json()
 }
