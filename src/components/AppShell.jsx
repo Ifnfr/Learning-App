@@ -8,6 +8,7 @@ import SpacedReview from '../modules/SpacedReview';
 import MockExam from '../modules/MockExam';
 import DailySeed from '../modules/DailySeed';
 import MistakeNotebook from '../modules/MistakeNotebook';
+import Settings from '../modules/Settings';
 
 export default function AppShell() {
   const { state } = useApp();
@@ -47,6 +48,8 @@ export default function AppShell() {
             <DailySeed />
           ) : state.activeModule === 'notebook' ? (
             <MistakeNotebook />
+          ) : state.activeModule === 'settings' ? (
+            <Settings />
           ) : (
             <div
               className="rounded-lg p-6"
