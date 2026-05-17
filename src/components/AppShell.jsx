@@ -4,6 +4,8 @@ import Sidebar from './Sidebar';
 import TodayFlow from '../modules/TodayFlow';
 import ConceptEngine from '../modules/ConceptEngine';
 import DrillMode from '../modules/DrillMode';
+import SpacedReview from '../modules/SpacedReview';
+import MockExam from '../modules/MockExam';
 
 export default function AppShell() {
   const { state } = useApp();
@@ -35,6 +37,10 @@ export default function AppShell() {
             <ConceptEngine />
           ) : state.activeModule === 'drill' ? (
             <DrillMode />
+          ) : state.activeModule === 'review' ? (
+            <SpacedReview />
+          ) : state.activeModule === 'mock' ? (
+            <MockExam />
           ) : (
             <div
               className="rounded-lg p-6"
