@@ -31,7 +31,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-router.post('/verify', (req, res) => {
+router.all('/verify', (req, res) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
