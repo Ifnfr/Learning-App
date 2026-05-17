@@ -69,7 +69,7 @@ const initialState = {
 
 // Fields persisted to localStorage (lightweight subset)
 const PERSIST_FIELDS = [
-  'onboarded', 'onboardedAt', 'apiKey', 'examDates', 'primaryExamId',
+  'onboarded', 'onboardedAt', 'examDates', 'primaryExamId',
   'activeModule', 'focusMode', 'theme', 'sidebarCollapsed',
   'diagnosticResults', 'topicMastery', 'streak', 'lastStudyDate', 'graceDayUsed',
   'srQueue', 'drillHistory', 'mockExamHistory', 'mistakes', 'focusSessions', 'preferences', 'seedStats',
@@ -78,7 +78,7 @@ const PERSIST_FIELDS = [
 function appReducer(state, action) {
   switch (action.type) {
     case 'SET_API_KEY':
-      return { ...state, apiKey: action.payload };
+      return state;
 
     case 'SET_THEME':
       return { ...state, theme: action.payload };

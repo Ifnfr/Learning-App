@@ -3,7 +3,7 @@
  * Handles the full lifecycle: parse -> build -> autoMetadata -> dual-pass validate -> save -> variate.
  */
 
-import { callClaude } from './api'
+import { callAI, callValidate } from './api'
 import { saveToIDB } from './storage'
 import { parseJSONSafe } from './parseJSON'
 import { parseSeedMarkdown, validateSeed } from './seedParser'
@@ -62,13 +62,12 @@ function getSubjectCode(subject) {
 }
 
 /**
- * Auto-fill missing metadata (difficulty, topic) using Claude.
+ * Auto-fill missing metadata (difficulty, topic) using AI.
  *
  * @param {object} seedObj - Seed object (may have null difficulty/topic)
- * @param {string} apiKey - Anthropic API key
  * @returns {Promise<object>} Updated seed object with difficulty and topic filled
  */
-export async function autoMetadata(seedObj, apiKey) {
+export async function autoMetadata(seedObj) {
   if (seedObj.difficulty && seedObj.topic) {
     return seedObj
   }
@@ -81,8 +80,8 @@ export async function autoMetadata(seedObj, apiKey) {
   ].join('\n')
 
   try {
-    const response = await callClaude({
-      apiKey,
+    const response = await callAI({
+      task: 'metadata',
       system: SEED_AUTO_METADATA_SYSTEM,
       messages: [{ role: 'user', content: userContent }],
       maxTokens: 256,
@@ -105,13 +104,12 @@ export async function autoMetadata(seedObj, apiKey) {
 }
 
 /**
- * Dual-pass validation: Claude solves the question independently, then we compare.
+ * Dual-pass validation: AI solves the question independently, then we compare.
  *
  * @param {object} seedObj - Complete seed object with question, options, answer
- * @param {string} apiKey - Anthropic API key
  * @returns {Promise<{ verified: boolean, claudeAnswer: string, mismatch: boolean, explanation: string }>}
  */
-export async function dualPassValidate(seedObj, apiKey) {
+export async function dualPassValidate(seedObj) {
   const userContent = [
     `Subject: ${seedObj.subject}`,
     `Question: ${seedObj.question}`,
@@ -120,9 +118,9 @@ export async function dualPassValidate(seedObj, apiKey) {
   ].join('\n')
 
   try {
-    // Pass 1: Claude solves from scratch (no answer key provided)
-    const response = await callClaude({
-      apiKey,
+    // Pass 1: AI solves from scratch (no answer key provided)
+    const response = await callAI({
+      task: 'dual_pass',
       system: SEED_DUAL_PASS_SYSTEM,
       messages: [{ role: 'user', content: userContent }],
       maxTokens: 512,
@@ -133,7 +131,7 @@ export async function dualPassValidate(seedObj, apiKey) {
     const claudeAnswer = (result.answer || '').toUpperCase().trim()
     const providedAnswer = seedObj.answer.toUpperCase().trim()
 
-    // Pass 2: Compare Claude's answer vs provided key
+    // Pass 2: Compare AI's answer vs provided key
     const mismatch = claudeAnswer !== providedAnswer
     const verified = !mismatch
 
@@ -166,10 +164,9 @@ export async function dualPassValidate(seedObj, apiKey) {
  *
  * @param {object} seedObj - Original seed object
  * @param {string} strategy - One of the 5 strategies
- * @param {string} apiKey - Anthropic API key
  * @returns {Promise<object>} Variation object with parentSeedId, variationStrategy, validatedBy
  */
-export async function generateVariation(seedObj, strategy, apiKey) {
+export async function generateVariation(seedObj, strategy) {
   const strategies = [
     'numerical_swap',
     'context_swap',
@@ -199,15 +196,15 @@ export async function generateVariation(seedObj, strategy, apiKey) {
     seedMarkdown,
   ].join('\n')
 
-  const response = await callClaude({
-    apiKey,
+  const response = await callAI({
+    task: 'metadata',
     system: SEED_VARIATION_SYSTEM,
     messages: [{ role: 'user', content: userContent }],
     maxTokens: 1500,
     temperature: 0.7,
   })
 
-  // Parse the variation markdown from Claude's response
+  // Parse the variation markdown from AI's response
   const variationParsed = parseSeedMarkdown(response)
 
   // Build variation object
@@ -224,12 +221,12 @@ export async function generateVariation(seedObj, strategy, apiKey) {
 
   // Validate the variation
   try {
-    const validation = await dualPassValidate(variation, apiKey)
+    const validation = await dualPassValidate(variation)
     variation.verified = validation.verified
     variation.validatedBy = validation.verified ? 'dual_pass_auto' : 'pending_review'
     if (validation.mismatch) {
       variation.flagCount = 1
-      variation.validationNote = `Claude answered ${validation.claudeAnswer}, key says ${variation.answer}`
+      variation.validationNote = `AI answered ${validation.claudeAnswer}, key says ${variation.answer}`
     }
   } catch (err) {
     variation.validatedBy = 'validation_failed'
@@ -304,12 +301,11 @@ export function qualityCheck(seedObj) {
  * Flow: parse -> validate -> build -> autoMetadata -> dualPass -> save -> dispatch -> auto-variate
  *
  * @param {string} markdown - Raw seed markdown content
- * @param {string} apiKey - Anthropic API key
  * @param {function} dispatch - AppContext dispatch function
  * @param {object} [preferences] - User preferences (e.g. autoVariate, defaultStrategy)
  * @returns {Promise<object>} Result with seed, validation, and variation data
  */
-export async function runSubmitPipeline(markdown, apiKey, dispatch, preferences = {}) {
+export async function runSubmitPipeline(markdown, dispatch, preferences = {}) {
   const result = {
     success: false,
     seed: null,
@@ -332,18 +328,14 @@ export async function runSubmitPipeline(markdown, apiKey, dispatch, preferences 
   let seedObj = buildSeedObject(parsed)
 
   // Step 4: Auto-fill metadata if missing
-  if (apiKey) {
-    seedObj = await autoMetadata(seedObj, apiKey)
-  }
+  seedObj = await autoMetadata(seedObj)
 
   // Step 5: Dual-pass validation
   let validation = { verified: false, claudeAnswer: '', mismatch: false, explanation: '' }
-  if (apiKey) {
-    validation = await dualPassValidate(seedObj, apiKey)
-    seedObj.verified = validation.verified
-    if (validation.mismatch) {
-      seedObj.flagCount = (seedObj.flagCount || 0) + 1
-    }
+  validation = await dualPassValidate(seedObj)
+  seedObj.verified = validation.verified
+  if (validation.mismatch) {
+    seedObj.flagCount = (seedObj.flagCount || 0) + 1
   }
   result.validation = validation
 
@@ -366,10 +358,10 @@ export async function runSubmitPipeline(markdown, apiKey, dispatch, preferences 
   result.success = true
 
   // Step 8: Auto-generate variation if preferences allow
-  if (apiKey && preferences.autoVariate !== false) {
+  if (preferences.autoVariate !== false) {
     const strategy = preferences.defaultStrategy || 'numerical_swap'
     try {
-      const variation = await generateVariation(seedObj, strategy, apiKey)
+      const variation = await generateVariation(seedObj, strategy)
       await saveToIDB('variations', variation)
       if (dispatch) {
         dispatch({ type: 'ADD_VARIATION' })

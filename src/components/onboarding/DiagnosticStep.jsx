@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
-import { callClaude } from '../../lib/api';
+import { callAI } from '../../lib/api';
 import { DIAGNOSTIC_SYSTEM } from '../../lib/prompts';
 import { parseJSONSafe } from '../../lib/parseJSON';
 
@@ -30,8 +30,8 @@ export default function DiagnosticStep({ onNext }) {
     setLoading(true);
     setError(null);
     try {
-      const response = await callClaude({
-        apiKey: state.apiKey,
+      const response = await callAI({
+        task: 'pretest',
         system: DIAGNOSTIC_SYSTEM,
         messages: [{ role: 'user', content: 'Generate 8 soal diagnostic SIMAK UI sekarang.' }],
         maxTokens: 4096,
