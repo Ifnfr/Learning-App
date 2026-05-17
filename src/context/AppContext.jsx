@@ -1,5 +1,7 @@
 import { createContext, useContext, useReducer, useEffect } from 'react';
 import { saveToLocalStorage, loadFromLocalStorage } from '../lib/storage';
+import { isAuthenticated } from '../lib/authClient';
+import { fetchState, pushState, fetchSRItems, fetchMistakes } from '../lib/sync';
 
 const STORAGE_KEY = 'simak_studyos_state';
 
@@ -72,7 +74,7 @@ const PERSIST_FIELDS = [
   'onboarded', 'onboardedAt', 'examDates', 'primaryExamId',
   'activeModule', 'focusMode', 'theme', 'sidebarCollapsed',
   'diagnosticResults', 'topicMastery', 'streak', 'lastStudyDate', 'graceDayUsed',
-  'srQueue', 'drillHistory', 'mockExamHistory', 'mistakes', 'focusSessions', 'preferences', 'seedStats',
+  'srQueue', 'preferences', 'seedStats',
 ];
 
 function appReducer(state, action) {
@@ -268,6 +270,54 @@ export function AppProvider({ children }) {
     }, 500);
     return () => clearTimeout(timeoutId);
   }, [state]);
+
+  // Sync state from backend on mount
+  useEffect(() => {
+    if (!isAuthenticated()) return
+    let cancelled = false
+    async function syncFromBackend() {
+      try {
+        const remoteState = await fetchState()
+        if (remoteState && !cancelled) {
+          dispatch({ type: 'IMPORT_DATA', payload: remoteState })
+        }
+        const remoteSR = await fetchSRItems()
+        if (remoteSR && remoteSR.length > 0 && !cancelled) {
+          dispatch({ type: 'IMPORT_DATA', payload: { srQueue: remoteSR } })
+        }
+        const remoteMistakes = await fetchMistakes()
+        if (remoteMistakes && remoteMistakes.length > 0 && !cancelled) {
+          dispatch({ type: 'IMPORT_DATA', payload: { mistakes: remoteMistakes } })
+        }
+      } catch (err) {
+        console.warn('[AppContext] sync from backend failed:', err.message)
+      }
+    }
+    syncFromBackend()
+    return () => { cancelled = true }
+  }, [])
+
+  // Push lightweight state to backend on changes (debounced)
+  useEffect(() => {
+    if (!isAuthenticated()) return
+    const timeoutId = setTimeout(() => {
+      const lightweight = {
+        onboarded: state.onboarded,
+        onboardedAt: state.onboardedAt,
+        examDates: state.examDates,
+        primaryExamId: state.primaryExamId,
+        diagnosticResults: state.diagnosticResults,
+        topicMastery: state.topicMastery,
+        streak: state.streak,
+        lastStudyDate: state.lastStudyDate,
+        graceDayUsed: state.graceDayUsed,
+        preferences: state.preferences,
+        seedStats: state.seedStats,
+      }
+      pushState(lightweight).catch(() => {})
+    }, 2000)
+    return () => clearTimeout(timeoutId)
+  }, [state.onboarded, state.examDates, state.primaryExamId, state.topicMastery, state.streak, state.lastStudyDate, state.preferences, state.seedStats])
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>

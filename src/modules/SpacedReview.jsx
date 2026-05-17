@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { calculateNextReview, brierScore } from '../lib/algorithms';
+import { updateSRItem as syncUpdateSRItem } from '../lib/sync';
 
 const LEECH_THRESHOLD = 5;
 
@@ -141,6 +142,17 @@ function TodayTab({ dueItems, dispatch }) {
         lapses,
       },
     });
+
+    // Sync to backend
+    try {
+      syncUpdateSRItem(item.id, {
+        ...result,
+        lapses,
+        next_review: result.nextReview,
+        interval_days: result.interval,
+        quality_history_json: result.qualityHistory,
+      });
+    } catch (e) { /* offline */ }
 
     // Advance to next item
     setFlipped(false);

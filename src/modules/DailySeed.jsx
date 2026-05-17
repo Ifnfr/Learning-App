@@ -4,6 +4,7 @@ import { parseSeedMarkdown, validateSeed } from '../lib/seedParser';
 import { runSubmitPipeline, buildSeedObject, dualPassValidate, generateVariation } from '../lib/seedPipeline';
 import { openDB, saveToIDB, deleteFromIDB } from '../lib/storage';
 import Icon from '../components/Icon';
+import { fetchSeeds as syncFetchSeeds, createSeed as syncCreateSeed, updateSeed as syncUpdateSeed, deleteSeed as syncDeleteSeed, fetchVariations as syncFetchVariations, createVariation as syncCreateVariation, deleteVariation as syncDeleteVariation } from '../lib/sync';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SUBJECTS = [
@@ -423,6 +424,15 @@ function BankTab({ state, dispatch, setActiveTab }) {
 
   async function loadSeeds() {
     try {
+      const remote = await syncFetchSeeds();
+      if (remote && remote.length >= 0) {
+        setSeeds(remote);
+        return;
+      }
+    } catch (err) {
+      // fallback to IDB
+    }
+    try {
       const db = await openDB();
       const tx = db.transaction('seedBank', 'readonly');
       const store = tx.objectStore('seedBank');
@@ -468,6 +478,7 @@ function BankTab({ state, dispatch, setActiveTab }) {
       dispatch({ type: 'DELETE_SEED' });
       setSeeds(prev => prev.filter(s => s.id !== id));
       setConfirmDelete(null);
+      try { await syncDeleteSeed(id); } catch (e) { /* offline, IDB already deleted */ }
     } catch (err) {
       console.warn('[DailySeed] delete failed:', err.message);
     }
@@ -481,6 +492,7 @@ function BankTab({ state, dispatch, setActiveTab }) {
       if (result.mismatch) updated.flagCount = (updated.flagCount || 0) + 1;
       await saveToIDB('seedBank', updated);
       setSeeds(prev => prev.map(s => s.id === seed.id ? updated : s));
+      try { await syncUpdateSeed(seed.id, updated); } catch (e) { /* offline */ }
     } catch (err) {
       console.warn('[DailySeed] revalidate failed:', err.message);
     }
@@ -683,6 +695,17 @@ function VariasiTab({ state, dispatch }) {
 
   async function loadData() {
     try {
+      const remoteSeeds = await syncFetchSeeds();
+      const remoteVariations = await syncFetchVariations();
+      if (remoteSeeds && remoteSeeds.length >= 0) {
+        setSeeds(remoteSeeds);
+      }
+      if (remoteVariations && remoteVariations.length >= 0) {
+        setVariations(remoteVariations);
+      }
+      if (remoteSeeds || remoteVariations) return;
+    } catch (e) { /* fallback */ }
+    try {
       const db = await openDB();
       const txVar = db.transaction('variations', 'readonly');
       const varReq = txVar.objectStore('variations').getAll();
@@ -725,6 +748,7 @@ function VariasiTab({ state, dispatch }) {
       await saveToIDB('variations', variation);
       dispatch({ type: 'ADD_VARIATION' });
       setVariations(prev => [...prev, variation]);
+      try { await syncCreateVariation(variation); } catch (e) { /* offline */ }
     } catch (err) {
       console.warn('[DailySeed] generateVariation failed:', err.message);
     }
@@ -736,6 +760,7 @@ function VariasiTab({ state, dispatch }) {
       await deleteFromIDB('variations', id);
       dispatch({ type: 'DELETE_VARIATION' });
       setVariations(prev => prev.filter(v => v.id !== id));
+      try { await syncDeleteVariation(id); } catch (e) { /* offline */ }
     } catch (err) {
       console.warn('[DailySeed] deleteVariation failed:', err.message);
     }
@@ -877,6 +902,17 @@ function StatsTab({ state }) {
   }, []);
 
   async function loadStats() {
+    try {
+      const remoteSeeds = await syncFetchSeeds();
+      const remoteVariations = await syncFetchVariations();
+      if (remoteSeeds && remoteSeeds.length >= 0) {
+        setSeeds(remoteSeeds);
+      }
+      if (remoteVariations && remoteVariations.length >= 0) {
+        setVariations(remoteVariations);
+      }
+      if (remoteSeeds || remoteVariations) return;
+    } catch (e) { /* fallback */ }
     try {
       const db = await openDB();
       const txSeed = db.transaction('seedBank', 'readonly');

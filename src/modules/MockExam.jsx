@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { queryByIndex } from '../lib/storage';
+import { logMock, fetchSeeds as syncFetchSeeds } from '../lib/sync';
 
 const SIZES = [
   { key: 'mini', label: 'Mini', questions: 20, minutes: 30 },
@@ -85,7 +86,13 @@ export default function MockExam() {
       for (const [subj, pct] of Object.entries(dist)) {
         const count = Math.round((pct / 100) * totalQ);
         if (count <= 0) continue;
-        const all = await queryByIndex('seedBank', 'subject', subj);
+        let all;
+        try {
+          const remote = await syncFetchSeeds({ subject: subj });
+          all = remote && remote.length >= 0 ? remote : await queryByIndex('seedBank', 'subject', subj);
+        } catch (e) {
+          all = await queryByIndex('seedBank', 'subject', subj);
+        }
         let pool = all;
         if (!config.allowRepeats && state.mockExamHistory.length > 0) {
           const usedIds = new Set();
@@ -161,6 +168,16 @@ export default function MockExam() {
     const questionsData = questions.map((q, i) => ({ questionId: q.id, subject: q.subject, userAnswer: answers[i], correctAnswer: q.answer, timeSpent: questionTimes[i] || 0, marked: marked[i] }));
     const res = { id: 'mock-' + Date.now(), timestamp: new Date().toISOString(), size: config.size, duration: timeUsed, totalQuestions: totalQ, score, accuracy, subjectBreakdown, timePerQuestion: questionTimes, questions: questionsData, distribution: config.distribution, slowestIdx, avgTime };
     dispatch({ type: 'LOG_MOCK_EXAM', payload: res });
+    // Sync to backend
+    try {
+      logMock({
+        ...res,
+        total_questions: res.totalQuestions,
+        subject_breakdown_json: res.subjectBreakdown,
+        questions_json: res.questions,
+        distribution_json: res.distribution,
+      });
+    } catch (e) { /* offline */ }
     setResult(res);
     setScreen('result');
   }
