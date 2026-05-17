@@ -136,6 +136,30 @@ export default function DrillMode() {
       errorBreakdown[cat] = (errorBreakdown[cat] || 0) + 1;
     });
 
+    // Compute ELO deltas directly from answers to avoid stale state
+    const computedDeltas = {};
+    drillAnswers.forEach(a => {
+      const topicKey = a.subject + '.' + a.topic;
+      if (!computedDeltas[topicKey]) {
+        const baseMastery = state.topicMastery[topicKey];
+        computedDeltas[topicKey] = {
+          before: baseMastery?.elo || 1000,
+          current: baseMastery?.elo || 1000,
+        };
+      }
+      const q = questions.find(q => q.id === a.questionId);
+      const difficulty = q?.difficulty || 1200;
+      const newElo = updateElo(computedDeltas[topicKey].current, difficulty, a.correct);
+      computedDeltas[topicKey].current = newElo;
+    });
+    const finalDeltas = {};
+    Object.entries(computedDeltas).forEach(([key, val]) => {
+      finalDeltas[key] = { before: val.before, after: val.current };
+    });
+
+    // Update local eloDeltas state for the result screen display
+    setEloDeltas(finalDeltas);
+
     dispatch({
       type: 'LOG_DRILL',
       payload: {
@@ -146,7 +170,7 @@ export default function DrillMode() {
         score,
         accuracy,
         timePerQuestion,
-        eloDeltas,
+        eloDeltas: finalDeltas,
         errorBreakdown,
         questions: drillAnswers,
       },
@@ -234,9 +258,18 @@ export default function DrillMode() {
 
 // ─── Setup Screen ─────────────────────────────────────────────────────────────
 function SetupScreen({ config, setConfig, state, onStart, loading, setLoading, error, setError }) {
+  const abortControllerRef = useRef(null);
   const allTopics = config.subject && config.subject !== 'interleave'
     ? SUBJECTS[config.subject].topics
     : [];
+
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   function getWeakestTopics() {
     const topics = [];
@@ -260,6 +293,12 @@ function SetupScreen({ config, setConfig, state, onStart, loading, setLoading, e
   }
 
   async function handleStart() {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setLoading(true);
     setError(null);
     try {
@@ -283,17 +322,26 @@ function SetupScreen({ config, setConfig, state, onStart, loading, setLoading, e
 
       const userPrompt = 'Buat ' + config.questionCount + ' soal dengan spesifikasi:\n\nSubject & Topics:\n' + topicList + '\n\nDistribusi topik merata. Sesuaikan difficulty per topik sesuai target di atas.';
 
+      // Scale maxTokens based on question count
+      const maxTokens = config.questionCount <= 10 ? 2048 : config.questionCount <= 20 ? 4096 : 8192;
+
       const raw = await callClaude({
         apiKey: state.apiKey,
         system: DRILL_SIMAK_BATCH_SYSTEM,
         messages: [{ role: 'user', content: userPrompt }],
-        maxTokens: 4096,
+        maxTokens,
         temperature: 0.7,
+        signal: controller.signal,
       });
 
       const parsed = parseJSONSafe(raw);
       if (!Array.isArray(parsed) || parsed.length === 0) {
         throw new Error('Response bukan array soal yang valid');
+      }
+
+      // Warn if fewer questions returned than requested, but proceed
+      if (parsed.length < config.questionCount) {
+        console.warn('[DrillMode] Requested ' + config.questionCount + ' questions but received ' + parsed.length + '. Proceeding with available questions.');
       }
 
       const validated = parsed.map((q, i) => ({
@@ -313,6 +361,7 @@ function SetupScreen({ config, setConfig, state, onStart, loading, setLoading, e
 
       onStart(validated);
     } catch (err) {
+      if (err.name === 'AbortError') return;
       setError(err.message);
     } finally {
       setLoading(false);
@@ -522,8 +571,9 @@ function DrillScreen({ question, currentIndex, total, config, hintUsed, setHintU
   const [confidence, setConfidence] = useState(50);
   const [revealed, setRevealed] = useState(false);
   const [showHint, setShowHint] = useState(false);
-  const [questionStart] = useState(Date.now());
   const [timerExpired, setTimerExpired] = useState(false);
+  const questionStartRef = useRef(Date.now());
+  const revealedRef = useRef(false);
 
   useEffect(() => {
     setSelected(null);
@@ -531,17 +581,21 @@ function DrillScreen({ question, currentIndex, total, config, hintUsed, setHintU
     setRevealed(false);
     setShowHint(false);
     setTimerExpired(false);
+    questionStartRef.current = Date.now();
+    revealedRef.current = false;
   }, [currentIndex]);
 
   function handleSubmit() {
-    if (revealed) return;
+    if (revealedRef.current) return;
+    revealedRef.current = true;
     setRevealed(true);
-    const timeSpent = Math.round((Date.now() - questionStart) / 1000);
+    const timeSpent = Math.round((Date.now() - questionStartRef.current) / 1000);
     onSubmit({ selected, confidence, timeSpent });
   }
 
   function handleTimerExpire() {
-    if (revealed) return;
+    if (revealedRef.current) return;
+    revealedRef.current = true;
     setTimerExpired(true);
     setRevealed(true);
     const timeSpent = config.timer;
@@ -667,6 +721,11 @@ function DrillScreen({ question, currentIndex, total, config, hintUsed, setHintU
 function CircularTimer({ duration, onExpire }) {
   const [remaining, setRemaining] = useState(duration);
   const intervalRef = useRef(null);
+  const onExpireRef = useRef(onExpire);
+
+  useEffect(() => {
+    onExpireRef.current = onExpire;
+  });
 
   useEffect(() => {
     setRemaining(duration);
@@ -674,7 +733,7 @@ function CircularTimer({ duration, onExpire }) {
       setRemaining(prev => {
         if (prev <= 1) {
           clearInterval(intervalRef.current);
-          onExpire();
+          onExpireRef.current();
           return 0;
         }
         return prev - 1;
@@ -931,7 +990,7 @@ function ResultScreen({ questions, answers, config, eloDeltas, dispatch, state, 
             {/* Dots */}
             {answers.map((a, i) => {
               const x = 20 + (a.confidence / 100) * 170;
-              const y = a.correct ? 20 + Math.random() * 20 : 60 + Math.random() * 20;
+              const y = a.correct ? 15 + (i % 5) * 8 : 55 + (i % 5) * 8;
               return (
                 <circle
                   key={i}

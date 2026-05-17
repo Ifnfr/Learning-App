@@ -29,6 +29,7 @@ function sleep(ms) {
  * @param {string} [options.model] - Model to use (default: claude-sonnet-4-5-20250929)
  * @param {number} [options.maxTokens] - Maximum response tokens (default: 1024)
  * @param {number} [options.temperature] - Sampling temperature (default: 0.7)
+ * @param {AbortSignal} [options.signal] - Optional AbortSignal to cancel the fetch
  * @returns {Promise<string>} Claude's response text
  */
 export async function callClaude({
@@ -38,6 +39,7 @@ export async function callClaude({
   model = DEFAULT_MODEL,
   maxTokens = 1024,
   temperature = 0.7,
+  signal,
 }) {
   if (!apiKey) {
     throw new Error('API key is required')
@@ -57,6 +59,7 @@ export async function callClaude({
         system,
         messages,
       }),
+      signal,
     })
 
     if (response.status === 429 && attempt < retryDelays.length) {
