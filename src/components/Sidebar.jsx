@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import Icon from './Icon';
 
@@ -19,6 +19,19 @@ const MOBILE_TABS = ['today', 'concept', 'drill', 'review'];
 export default function Sidebar() {
   const { state, dispatch } = useApp();
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef(null);
+
+  // Close "More" menu on outside click
+  useEffect(() => {
+    if (!moreOpen) return;
+    function handleClickOutside(event) {
+      if (moreRef.current && !moreRef.current.contains(event.target)) {
+        setMoreOpen(false);
+      }
+    }
+    document.addEventListener('click', handleClickOutside, true);
+    return () => document.removeEventListener('click', handleClickOutside, true);
+  }, [moreOpen]);
 
   const handleNav = (moduleId) => {
     dispatch({ type: 'SET_MODULE', payload: moduleId });
@@ -89,7 +102,7 @@ export default function Sidebar() {
         );
       })}
       {/* More button */}
-      <div className="relative flex-1 h-full">
+      <div ref={moreRef} className="relative flex-1 h-full">
         <button
           onClick={() => setMoreOpen(!moreOpen)}
           className="flex flex-col items-center justify-center w-full h-full gap-0.5"

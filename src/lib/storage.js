@@ -32,7 +32,12 @@ export function loadFromLocalStorage(key, fallback = null) {
 
 // --- IndexedDB helpers ---
 
+let cachedDB = null;
+
 export function openDB() {
+  if (cachedDB) {
+    return Promise.resolve(cachedDB);
+  }
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
@@ -42,6 +47,17 @@ export function openDB() {
 
       // Create v2.0 stores if upgrading from nothing or v1
       if (oldVersion < 2) {
+        // Remove legacy v1 stores if they exist
+        if (db.objectStoreNames.contains('cards')) {
+          db.deleteObjectStore('cards');
+        }
+        if (db.objectStoreNames.contains('sessions')) {
+          db.deleteObjectStore('sessions');
+        }
+        if (db.objectStoreNames.contains('seeds')) {
+          db.deleteObjectStore('seeds');
+        }
+
         // mistakes store
         if (!db.objectStoreNames.contains('mistakes')) {
           const mistakesStore = db.createObjectStore('mistakes', { keyPath: 'id' });
@@ -106,7 +122,15 @@ export function openDB() {
       }
     };
 
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => {
+        db.close();
+        cachedDB = null;
+      };
+      cachedDB = db;
+      resolve(db);
+    };
     request.onerror = () => reject(request.error);
   });
 }

@@ -248,13 +248,16 @@ export function AppProvider({ children }) {
     return initialState;
   });
 
-  // Persist lightweight fields to localStorage on state change
+  // Persist lightweight fields to localStorage on state change (debounced)
   useEffect(() => {
-    const toPersist = {};
-    for (const key of PERSIST_FIELDS) {
-      toPersist[key] = state[key];
-    }
-    saveToLocalStorage(STORAGE_KEY, toPersist);
+    const timeoutId = setTimeout(() => {
+      const toPersist = {};
+      for (const key of PERSIST_FIELDS) {
+        toPersist[key] = state[key];
+      }
+      saveToLocalStorage(STORAGE_KEY, toPersist);
+    }, 500);
+    return () => clearTimeout(timeoutId);
   }, [state]);
 
   return (
