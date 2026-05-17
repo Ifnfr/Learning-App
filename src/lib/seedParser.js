@@ -159,9 +159,19 @@ export function parseSeedMarkdown(markdown) {
   const pilihanContent = sections['pilihan'] || ''
   const optionLetters = ['A', 'B', 'C', 'D', 'E']
 
-  for (const letter of optionLetters) {
-    const regex = new RegExp(`^${letter}\\.\\s*(.+)`, 'm')
-    const optMatch = pilihanContent.match(regex)
+  for (let i = 0; i < optionLetters.length; i++) {
+    const letter = optionLetters[i]
+    // Build a regex that captures from "X. " until the next option letter line or end of section
+    const nextLetters = optionLetters.slice(i + 1)
+    let pattern
+    if (nextLetters.length > 0) {
+      // Capture everything from "X. " until a line starting with the next option letter
+      pattern = new RegExp(`^${letter}\\.\\s*([\\s\\S]*?)(?=^[${nextLetters.join('')}]\\.\\s)`, 'm')
+    } else {
+      // Last option: capture everything from "X. " to end
+      pattern = new RegExp(`^${letter}\\.\\s*([\\s\\S]*)$`, 'm')
+    }
+    const optMatch = pilihanContent.match(pattern)
     if (optMatch) {
       options[letter] = optMatch[1].trim()
     }

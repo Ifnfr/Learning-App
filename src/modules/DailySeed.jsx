@@ -136,7 +136,6 @@ function SubmitTab({ state, dispatch }) {
         { autoVariate: state.preferences.autoVariateOnSubmit }
       );
       if (pipelineResult.success) {
-        dispatch({ type: 'ADD_SEED' });
         if (state.seedStats.lastSeedDate !== today) {
           const gap = state.seedStats.lastSeedDate
             ? Math.floor((new Date(today) - new Date(state.seedStats.lastSeedDate)) / 86400000)
@@ -184,7 +183,6 @@ function SubmitTab({ state, dispatch }) {
       try {
         const res = await runSubmitPipeline(text, state.apiKey, dispatch, { autoVariate: state.preferences.autoVariateOnSubmit });
         if (res.success) {
-          dispatch({ type: 'ADD_SEED' });
           if (state.seedStats.lastSeedDate !== today) {
             dispatch({ type: 'INCREMENT_SEED_STREAK' });
           }

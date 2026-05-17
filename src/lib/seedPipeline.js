@@ -356,9 +356,9 @@ export async function runSubmitPipeline(markdown, apiKey, dispatch, preferences 
 
   // Step 7: Dispatch actions
   if (dispatch) {
-    dispatch({ type: 'SEED_ADDED', payload: seedObj })
+    dispatch({ type: 'ADD_SEED' })
     if (validation.verified) {
-      dispatch({ type: 'SEED_VERIFIED', payload: { id: seedObj.id } })
+      dispatch({ type: 'RESOLVE_SEED_FLAG' })
     }
   }
 
@@ -372,7 +372,7 @@ export async function runSubmitPipeline(markdown, apiKey, dispatch, preferences 
       const variation = await generateVariation(seedObj, strategy, apiKey)
       await saveToIDB('variations', variation)
       if (dispatch) {
-        dispatch({ type: 'VARIATION_ADDED', payload: variation })
+        dispatch({ type: 'ADD_VARIATION' })
       }
       result.variations.push(variation)
     } catch (err) {

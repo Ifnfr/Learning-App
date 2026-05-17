@@ -444,7 +444,6 @@ function MistakeCard({ mistake, onRetry, onMaster, onDelete }) {
 
 // ─── Retry Modal ──────────────────────────────────────────────────────────────
 function RetryModal({ mistake, dispatch, onClose }) {
-  const { state } = useApp();
   const [selected, setSelected] = useState(null);
   const [revealed, setRevealed] = useState(false);
   const [consecutiveCorrect, setConsecutiveCorrect] = useState(
@@ -468,11 +467,8 @@ function RetryModal({ mistake, dispatch, onClose }) {
       const newConsecutive = consecutiveCorrect + 1;
       setConsecutiveCorrect(newConsecutive);
 
-      // Update consecutiveCorrect on the mistake via IMPORT_DATA
-      const updatedMistakes = state.mistakes.map(m =>
-        m.id === mistake.id ? { ...m, consecutiveCorrect: newConsecutive } : m
-      );
-      dispatch({ type: 'IMPORT_DATA', payload: { mistakes: updatedMistakes } });
+      // Update consecutiveCorrect on the mistake via targeted action
+      dispatch({ type: 'UPDATE_MISTAKE', payload: { id: mistake.id, data: { consecutiveCorrect: newConsecutive } } });
 
       // Auto-mastery after 3 consecutive correct
       if (newConsecutive >= 3) {
@@ -481,10 +477,7 @@ function RetryModal({ mistake, dispatch, onClose }) {
     } else {
       setConsecutiveCorrect(0);
       // Reset consecutiveCorrect on wrong answer
-      const updatedMistakes = state.mistakes.map(m =>
-        m.id === mistake.id ? { ...m, consecutiveCorrect: 0 } : m
-      );
-      dispatch({ type: 'IMPORT_DATA', payload: { mistakes: updatedMistakes } });
+      dispatch({ type: 'UPDATE_MISTAKE', payload: { id: mistake.id, data: { consecutiveCorrect: 0 } } });
     }
   }
 

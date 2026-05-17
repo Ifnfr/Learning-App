@@ -148,6 +148,14 @@ function appReducer(state, action) {
         ),
       };
 
+    case 'UPDATE_MISTAKE':
+      return {
+        ...state,
+        mistakes: state.mistakes.map(m =>
+          m.id === action.payload.id ? { ...m, ...action.payload.data } : m
+        ),
+      };
+
     case 'LOG_CONFIDENCE':
       return { ...state, calibrationLog: [...state.calibrationLog, action.payload] };
 
