@@ -6,6 +6,8 @@ import ConceptEngine from '../modules/ConceptEngine';
 import DrillMode from '../modules/DrillMode';
 import SpacedReview from '../modules/SpacedReview';
 import MockExam from '../modules/MockExam';
+import DailySeed from '../modules/DailySeed';
+import MistakeNotebook from '../modules/MistakeNotebook';
 
 export default function AppShell() {
   const { state } = useApp();
@@ -41,6 +43,10 @@ export default function AppShell() {
             <SpacedReview />
           ) : state.activeModule === 'mock' ? (
             <MockExam />
+          ) : state.activeModule === 'seed' ? (
+            <DailySeed />
+          ) : state.activeModule === 'notebook' ? (
+            <MistakeNotebook />
           ) : (
             <div
               className="rounded-lg p-6"
