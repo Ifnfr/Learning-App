@@ -64,7 +64,56 @@ export async function stream({ system, messages, maxTokens = 4096, temperature =
     throw new Error(`Google AI API error ${response.status}: ${err}`);
   }
 
-  return response.body;
+  // Parse Google SSE protocol and yield plain text chunks
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  return new ReadableStream({
+    async pull(controller) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          if (buffer.trim()) {
+            const lines = buffer.split('\n');
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                  if (text) {
+                    controller.enqueue(text);
+                  }
+                } catch {}
+              }
+            }
+          }
+          controller.close();
+          return;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (text) {
+                controller.enqueue(text);
+                return; // Yield control back after enqueuing
+              }
+            } catch {}
+          }
+        }
+      }
+    },
+    cancel() {
+      reader.cancel();
+    },
+  });
 }
 
 export default { generate, stream, name: 'google', defaultModel: DEFAULT_MODEL };

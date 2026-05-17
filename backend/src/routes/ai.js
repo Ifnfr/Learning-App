@@ -36,14 +36,13 @@ router.post('/stream', async (req, res) => {
     res.write(`data: ${JSON.stringify({ provider, model })}\n\n`);
 
     const reader = stream.getReader();
-    const decoder = new TextDecoder();
 
     try {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
+        // value is already a plain text string from the provider's parsed stream
+        res.write(`data: ${JSON.stringify({ text: value })}\n\n`);
       }
     } catch (streamErr) {
       // Stream aborted or errored

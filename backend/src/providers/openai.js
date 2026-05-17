@@ -62,7 +62,61 @@ function createProvider({ baseURL, apiKey, name, defaultModel }) {
       throw new Error(`${name} API error ${response.status}: ${err}`);
     }
 
-    return response.body;
+    // Parse OpenAI-compatible SSE protocol and yield plain text chunks
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    return new ReadableStream({
+      async pull(controller) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            if (buffer.trim()) {
+              const lines = buffer.split('\n');
+              for (const line of lines) {
+                if (line.startsWith('data: ') && line.slice(6).trim() !== '[DONE]') {
+                  try {
+                    const data = JSON.parse(line.slice(6));
+                    const content = data.choices?.[0]?.delta?.content;
+                    if (content) {
+                      controller.enqueue(content);
+                    }
+                  } catch {}
+                }
+              }
+            }
+            controller.close();
+            return;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const payload = line.slice(6).trim();
+              if (payload === '[DONE]') {
+                controller.close();
+                return;
+              }
+              try {
+                const data = JSON.parse(payload);
+                const content = data.choices?.[0]?.delta?.content;
+                if (content) {
+                  controller.enqueue(content);
+                  return; // Yield control back after enqueuing
+                }
+              } catch {}
+            }
+          }
+        }
+      },
+      cancel() {
+        reader.cancel();
+      },
+    });
   }
 
   return { generate, stream, name, defaultModel };

@@ -3,7 +3,7 @@
  * Communicates with the backend proxy for AI operations.
  */
 
-import { getToken } from './authClient'
+import { getToken, handleAuthExpired } from './authClient'
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001'
 
@@ -62,6 +62,7 @@ export async function callAI({
     }
 
     if (response.status === 401) {
+      handleAuthExpired()
       const err = new Error('Sesi telah berakhir. Silakan login ulang.')
       err.code = 'UNAUTHORIZED'
       throw err
@@ -128,6 +129,7 @@ export async function callAIStream({
     }
 
     if (response.status === 401) {
+      handleAuthExpired()
       const err = new Error('Sesi telah berakhir. Silakan login ulang.')
       err.code = 'UNAUTHORIZED'
       throw err
@@ -199,6 +201,7 @@ export async function callValidate({ question, options, signal }) {
   })
 
   if (response.status === 401) {
+    handleAuthExpired()
     const err = new Error('Sesi telah berakhir. Silakan login ulang.')
     err.code = 'UNAUTHORIZED'
     throw err

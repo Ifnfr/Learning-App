@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { isAuthenticated, verify, login } from '../lib/authClient'
+import { isAuthenticated, verify, login, logout, AUTH_EXPIRED_EVENT } from '../lib/authClient'
 
 export default function LoginGate({ children }) {
   const [authenticated, setAuthenticated] = useState(false)
@@ -10,6 +10,16 @@ export default function LoginGate({ children }) {
 
   useEffect(() => {
     checkAuth()
+  }, [])
+
+  // Listen for auth-expired events (fired on 401 mid-session)
+  useEffect(() => {
+    function handleExpired() {
+      setAuthenticated(false)
+      setPassphrase('')
+    }
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleExpired)
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleExpired)
   }, [])
 
   async function checkAuth() {

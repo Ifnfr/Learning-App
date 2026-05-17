@@ -1,3 +1,7 @@
+// In-memory rate limiter: 100 requests per hour per IP.
+// NOTE: This state is ephemeral and resets on every process restart or redeploy.
+// For durable rate limiting in production, consider a Redis-backed store.
+
 const windowMs = 60 * 60 * 1000; // 1 hour
 const maxRequests = 100;
 

@@ -4,12 +4,24 @@
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001'
 const TOKEN_KEY = 'simak_jwt'
 
+// Custom event name dispatched when a 401 is detected mid-session
+export const AUTH_EXPIRED_EVENT = 'simak:auth-expired'
+
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY)
 }
 
 export function isAuthenticated() {
   return !!getToken()
+}
+
+/**
+ * Called when a 401 response is received mid-session.
+ * Clears the token and dispatches an event so LoginGate can force re-render.
+ */
+export function handleAuthExpired() {
+  logout()
+  window.dispatchEvent(new CustomEvent(AUTH_EXPIRED_EVENT))
 }
 
 export async function login(passphrase) {

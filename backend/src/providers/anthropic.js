@@ -59,7 +59,55 @@ export async function stream({ system, messages, maxTokens = 4096, temperature =
     throw new Error(`Anthropic API error ${response.status}: ${err}`);
   }
 
-  return response.body;
+  // Parse Anthropic SSE protocol and yield plain text chunks
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  return new ReadableStream({
+    async pull(controller) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          // Process any remaining buffer
+          if (buffer.trim()) {
+            const lines = buffer.split('\n');
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  if (data.type === 'content_block_delta' && data.delta?.text) {
+                    controller.enqueue(data.delta.text);
+                  }
+                } catch {}
+              }
+            }
+          }
+          controller.close();
+          return;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.type === 'content_block_delta' && data.delta?.text) {
+                controller.enqueue(data.delta.text);
+                return; // Yield control back after enqueuing
+              }
+            } catch {}
+          }
+        }
+      }
+    },
+    cancel() {
+      reader.cancel();
+    },
+  });
 }
 
 export default { generate, stream, name: 'anthropic', defaultModel: DEFAULT_MODEL };
