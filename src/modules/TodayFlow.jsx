@@ -412,6 +412,8 @@ function BottomStats({ state }) {
   const subjects = ['matematika', 'tpa', 'bahasa_inggris', 'bahasa_indonesia'];
   const today = new Date();
 
+  const { drillHistory, focusSessions, totalFocusMinutes: totalFocusMin, topicMastery } = state;
+
   // Compute sparkline data: accuracy per day for last 7 days, per subject
   const sparklineData = useMemo(() => {
     const result = {};
@@ -422,7 +424,7 @@ function BottomStats({ state }) {
         date.setDate(date.getDate() - i);
         const dateStr = date.toISOString().split('T')[0];
 
-        const entries = (state.drillHistory || []).filter(
+        const entries = (drillHistory || []).filter(
           (d) => d.subject === subj && d.timestamp && d.timestamp.startsWith(dateStr)
         );
         if (entries.length > 0) {
@@ -436,12 +438,12 @@ function BottomStats({ state }) {
       result[subj] = dailyAccuracy;
     }
     return result;
-  }, [state.drillHistory]);
+  }, [drillHistory]);
 
   // Totals
-  const totalFocusMinutes = state.totalFocusMinutes || 0;
-  const questionsAnswered = (state.drillHistory || []).length;
-  const conceptsMastered = Object.values(state.topicMastery || {}).filter(
+  const totalFocusMinutes = totalFocusMin || 0;
+  const questionsAnswered = (drillHistory || []).length;
+  const conceptsMastered = Object.values(topicMastery || {}).filter(
     (t) => t.elo >= 1400
   ).length;
 
@@ -451,20 +453,20 @@ function BottomStats({ state }) {
     const oneWeekAgo = now - 7 * 86400000;
     const twoWeeksAgo = now - 14 * 86400000;
 
-    const thisWeekDrills = (state.drillHistory || []).filter(
+    const thisWeekDrills = (drillHistory || []).filter(
       (d) => d.timestamp && new Date(d.timestamp).getTime() > oneWeekAgo
     ).length;
-    const lastWeekDrills = (state.drillHistory || []).filter(
+    const lastWeekDrills = (drillHistory || []).filter(
       (d) => {
         const t = d.timestamp && new Date(d.timestamp).getTime();
         return t > twoWeeksAgo && t <= oneWeekAgo;
       }
     ).length;
 
-    const thisWeekFocus = (state.focusSessions || [])
+    const thisWeekFocus = (focusSessions || [])
       .filter((s) => s.startedAt && new Date(s.startedAt).getTime() > oneWeekAgo && s.completed)
       .reduce((sum, s) => sum + (s.durationMin || 0), 0);
-    const lastWeekFocus = (state.focusSessions || [])
+    const lastWeekFocus = (focusSessions || [])
       .filter((s) => {
         const t = s.startedAt && new Date(s.startedAt).getTime();
         return t > twoWeeksAgo && t <= oneWeekAgo && s.completed;
@@ -475,7 +477,7 @@ function BottomStats({ state }) {
       drillDelta: thisWeekDrills - lastWeekDrills,
       focusDelta: thisWeekFocus - lastWeekFocus,
     };
-  }, [state.drillHistory, state.focusSessions]);
+  }, [drillHistory, focusSessions]);
 
   return (
     <div className="flex flex-col gap-6 mt-8">
@@ -502,8 +504,8 @@ function BottomStats({ state }) {
           Aktivitas 30 Hari
         </h3>
         <ActivityHeatmap
-          drillHistory={state.drillHistory}
-          focusSessions={state.focusSessions}
+          drillHistory={drillHistory}
+          focusSessions={focusSessions}
         />
       </div>
 
@@ -565,13 +567,8 @@ function HeroStrip({ state }) {
 
   // Compute day count (days since onboarding)
   let dayCount = 1;
-  if (state.examDates && state.examDates.length > 0) {
-    const firstExam = state.examDates[0];
-    // Use streak as fallback for daysSinceStart if we cannot infer onboarding date
-    if (state.lastStudyDate) {
-      // Approximate: streak tells us how many consecutive days, dayCount = streak or at least 1
-      dayCount = Math.max(state.streak, 1);
-    }
+  if (state.onboardedAt) {
+    dayCount = daysBetween(state.onboardedAt, today) + 1;
   } else {
     dayCount = Math.max(state.streak, 1);
   }
@@ -647,12 +644,13 @@ function HeroStrip({ state }) {
 export default function TodayFlow() {
   const { state, dispatch } = useApp();
 
+  const { srQueue, mistakes, topicMastery, drillHistory, diagnosticResults } = state;
   const missions = useMemo(() => {
     if (isFreshUser(state)) {
       return generateStarterMissions(state);
     }
     return generateMissions(state);
-  }, [state]);
+  }, [srQueue, mistakes, topicMastery, drillHistory, diagnosticResults]);
 
   return (
     <div className="flex flex-col gap-6">

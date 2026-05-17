@@ -6,6 +6,7 @@ const STORAGE_KEY = 'simak_studyos_state';
 const initialState = {
   // Onboarding & Identity
   onboarded: false,
+  onboardedAt: null,
   apiKey: '',
   examDates: [],
   primaryExamId: null,
@@ -68,10 +69,10 @@ const initialState = {
 
 // Fields persisted to localStorage (lightweight subset)
 const PERSIST_FIELDS = [
-  'onboarded', 'apiKey', 'examDates', 'primaryExamId',
+  'onboarded', 'onboardedAt', 'apiKey', 'examDates', 'primaryExamId',
   'activeModule', 'focusMode', 'theme', 'sidebarCollapsed',
   'diagnosticResults', 'topicMastery', 'streak', 'lastStudyDate', 'graceDayUsed',
-  'srQueue', 'preferences', 'seedStats',
+  'srQueue', 'drillHistory', 'mistakes', 'focusSessions', 'preferences', 'seedStats',
 ];
 
 function appReducer(state, action) {
@@ -89,7 +90,7 @@ function appReducer(state, action) {
       return { ...state, focusMode: !state.focusMode };
 
     case 'COMPLETE_ONBOARDING':
-      return { ...state, onboarded: true };
+      return { ...state, onboarded: true, onboardedAt: new Date().toISOString().split('T')[0] };
 
     case 'ADD_EXAM_DATE':
       return { ...state, examDates: [...state.examDates, action.payload] };
