@@ -26,11 +26,11 @@ function buildRequestBody(system, messages, temperature, maxTokens) {
 
 export async function generate({ system, messages, maxTokens = 4096, temperature = 0.7, signal, model }) {
   const modelId = model || DEFAULT_MODEL;
-  const url = `${BASE_URL}/${modelId}:generateContent?key=${config.googleAiKey}`;
+  const url = `${BASE_URL}/${modelId}:generateContent`;
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.googleAiKey },
     body: JSON.stringify(buildRequestBody(system, messages, temperature, maxTokens)),
     signal,
   });
@@ -50,11 +50,11 @@ export async function generate({ system, messages, maxTokens = 4096, temperature
 
 export async function stream({ system, messages, maxTokens = 4096, temperature = 0.7, signal, model }) {
   const modelId = model || DEFAULT_MODEL;
-  const url = `${BASE_URL}/${modelId}:streamGenerateContent?alt=sse&key=${config.googleAiKey}`;
+  const url = `${BASE_URL}/${modelId}:streamGenerateContent?alt=sse`;
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': config.googleAiKey },
     body: JSON.stringify(buildRequestBody(system, messages, temperature, maxTokens)),
     signal,
   });
@@ -96,6 +96,7 @@ export async function stream({ system, messages, maxTokens = 4096, temperature =
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
 
+        let enqueued = false;
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             try {
@@ -103,11 +104,12 @@ export async function stream({ system, messages, maxTokens = 4096, temperature =
               const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
               if (text) {
                 controller.enqueue(text);
-                return; // Yield control back after enqueuing
+                enqueued = true;
               }
             } catch {}
           }
         }
+        if (enqueued) return; // Yield control after processing all lines from this read
       }
     },
     cancel() {

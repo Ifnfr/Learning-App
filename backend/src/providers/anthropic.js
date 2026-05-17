@@ -91,17 +91,19 @@ export async function stream({ system, messages, maxTokens = 4096, temperature =
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
 
+        let enqueued = false;
         for (const line of lines) {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
               if (data.type === 'content_block_delta' && data.delta?.text) {
                 controller.enqueue(data.delta.text);
-                return; // Yield control back after enqueuing
+                enqueued = true;
               }
             } catch {}
           }
         }
+        if (enqueued) return; // Yield control after processing all lines from this read
       }
     },
     cancel() {

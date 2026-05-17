@@ -94,6 +94,7 @@ function createProvider({ baseURL, apiKey, name, defaultModel }) {
           const lines = buffer.split('\n');
           buffer = lines.pop() || '';
 
+          let enqueued = false;
           for (const line of lines) {
             if (line.startsWith('data: ')) {
               const payload = line.slice(6).trim();
@@ -106,11 +107,12 @@ function createProvider({ baseURL, apiKey, name, defaultModel }) {
                 const content = data.choices?.[0]?.delta?.content;
                 if (content) {
                   controller.enqueue(content);
-                  return; // Yield control back after enqueuing
+                  enqueued = true;
                 }
               } catch {}
             }
           }
+          if (enqueued) return; // Yield control after processing all lines from this read
         }
       },
       cancel() {
