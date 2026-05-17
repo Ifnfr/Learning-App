@@ -1,5 +1,17 @@
 import { v4 as uuidv4 } from 'uuid';
 
+// ─── Schema whitelist for import validation ─────────────────────────────────
+
+const SCHEMA = {
+  user_state: ['id', 'state_json', 'updated_at'],
+  seeds: ['id', 'subject', 'topic', 'difficulty', 'question', 'options_json', 'answer', 'explanation', 'trap', 'source', 'date_posted', 'verified', 'flag_count', 'created_at'],
+  variations: ['id', 'parent_seed_id', 'strategy', 'subject', 'topic', 'difficulty', 'question', 'options_json', 'answer', 'explanation', 'validated_by', 'flag_count', 'created_at'],
+  mistakes: ['id', 'subject', 'topic', 'question', 'options_json', 'user_answer', 'correct_answer', 'explanation', 'error_category', 'confidence', 'retry_count', 'consecutive_correct', 'mastered', 'note', 'created_at'],
+  drill_history: ['id', 'mode', 'question_count', 'score', 'accuracy', 'timestamp', 'elo_deltas_json', 'error_breakdown_json', 'questions_json'],
+  mock_history: ['id', 'size', 'score', 'total_questions', 'accuracy', 'duration', 'timestamp', 'subject_breakdown_json', 'questions_json', 'distribution_json'],
+  sr_items: ['id', 'subject', 'topic', 'prompt', 'answer', 'next_review', 'interval_days', 'ease', 'lapses', 'quality_history_json', 'created_at'],
+};
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function paginate(db, baseQuery, countQuery, params, page = 1, limit = 20) {
@@ -344,9 +356,17 @@ export function createMock(db, mock) {
 
 // ─── sr_items ───────────────────────────────────────────────────────────────
 
-export function listSRItems(db) {
-  const data = db.prepare('SELECT * FROM sr_items ORDER BY next_review ASC').all();
-  return parseJsonFieldsArray(data, ['quality_history_json']);
+export function listSRItems(db, { page = 1, limit = 5000 } = {}) {
+  const offset = (page - 1) * limit;
+  const safeLimit = Math.min(limit, 5000);
+  const data = db.prepare('SELECT * FROM sr_items ORDER BY next_review ASC LIMIT ? OFFSET ?').all(safeLimit, offset);
+  const totalRow = db.prepare('SELECT COUNT(*) as total FROM sr_items').get();
+  const total = totalRow ? totalRow.total : 0;
+  const totalPages = Math.ceil(total / safeLimit);
+  return {
+    data: parseJsonFieldsArray(data, ['quality_history_json']),
+    pagination: { page, limit: safeLimit, total, totalPages },
+  };
 }
 
 export function createSRItem(db, item) {
@@ -408,6 +428,13 @@ export function exportAll(db) {
 export function importAll(db, data) {
   const tables = ['user_state', 'seeds', 'variations', 'mistakes', 'drill_history', 'mock_history', 'sr_items'];
 
+  // Pre-check: validate that all provided table entries are valid arrays before deleting anything
+  for (const table of tables) {
+    if (data[table] !== undefined && !Array.isArray(data[table])) {
+      throw new Error(`Table "${table}" must be an array, got ${typeof data[table]}`);
+    }
+  }
+
   const importTransaction = db.transaction((importData) => {
     // Clear all tables in reverse order (respect FK constraints)
     db.prepare('DELETE FROM variations').run();
@@ -420,10 +447,19 @@ export function importAll(db, data) {
 
     for (const table of tables) {
       if (!importData[table] || !Array.isArray(importData[table])) continue;
+      const allowedColumns = SCHEMA[table];
+      if (!allowedColumns) continue;
+
       for (const row of importData[table]) {
-        const columns = Object.keys(row);
+        // Filter to only allowed columns
+        const columns = Object.keys(row).filter((c) => allowedColumns.includes(c));
+        if (columns.length === 0) continue;
         const placeholders = columns.map((c) => `@${c}`).join(', ');
-        db.prepare(`INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders})`).run(row);
+        const filteredRow = {};
+        for (const c of columns) {
+          filteredRow[c] = row[c];
+        }
+        db.prepare(`INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders})`).run(filteredRow);
       }
     }
   });

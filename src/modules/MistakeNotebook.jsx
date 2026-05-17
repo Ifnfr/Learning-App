@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import Icon from '../components/Icon';
-import { fetchMistakes as syncFetchMistakes, updateMistake as syncUpdateMistake, deleteMistake as syncDeleteMistake } from '../lib/sync';
+import { updateMistake as syncUpdateMistake, deleteMistake as syncDeleteMistake } from '../lib/sync';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SUBJECTS = {
@@ -47,19 +47,6 @@ export default function MistakeNotebook() {
       dispatch({ type: 'IMPORT_DATA', payload: { mistakes: kept } });
     }
   }, [state.mistakes?.length]);
-
-  // Load mistakes from backend on mount
-  useEffect(() => {
-    async function loadFromBackend() {
-      try {
-        const remote = await syncFetchMistakes();
-        if (remote && remote.length > 0) {
-          dispatch({ type: 'IMPORT_DATA', payload: { mistakes: remote } });
-        }
-      } catch (e) { /* use local state */ }
-    }
-    loadFromBackend();
-  }, []);
 
   // Filtered mistakes
   const filteredMistakes = useMemo(() => {

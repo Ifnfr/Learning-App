@@ -26,6 +26,9 @@ import {
   importAll,
 } from '../db/queries.js';
 
+// NOTE: Single-tenant design - all authenticated users share the same data store.
+// This app is designed for personal use with a single passphrase.
+
 const router = Router();
 
 // ─── State ──────────────────────────────────────────────────────────────────
@@ -258,8 +261,10 @@ router.post('/mocks', (req, res) => {
 router.get('/sr', (req, res) => {
   try {
     const db = getDB();
-    const data = listSRItems(db);
-    return res.json({ data });
+    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(parseInt(req.query.limit) || 5000, 5000);
+    const result = listSRItems(db, { page, limit });
+    return res.json(result);
   } catch (err) {
     return res.status(500).json({ error: 'Failed to list SR items' });
   }
@@ -326,6 +331,12 @@ router.post('/import', (req, res) => {
     const hasValidData = validTables.some((table) => Array.isArray(req.body[table]));
     if (!hasValidData) {
       return res.status(400).json({ error: 'Import data must contain at least one valid table array. Valid tables: ' + validTables.join(', ') });
+    }
+    // Validate that ALL provided table keys contain arrays (not malformed data)
+    for (const table of validTables) {
+      if (req.body[table] !== undefined && !Array.isArray(req.body[table])) {
+        return res.status(400).json({ error: `Table "${table}" must be an array, got ${typeof req.body[table]}` });
+      }
     }
     const result = importAll(db, req.body);
     return res.json(result);
