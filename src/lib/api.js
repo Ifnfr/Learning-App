@@ -97,6 +97,7 @@ export async function callClaude({
  * @param {number} [options.maxTokens] - Maximum response tokens (default: 1024)
  * @param {number} [options.temperature] - Sampling temperature (default: 0.7)
  * @param {function} options.onChunk - Callback invoked with each text delta string
+ * @param {AbortSignal} [options.signal] - Optional AbortSignal to cancel the fetch
  * @returns {Promise<string>} Full accumulated response text
  */
 export async function callClaudeStream({
@@ -107,6 +108,7 @@ export async function callClaudeStream({
   maxTokens = 1024,
   temperature = 0.7,
   onChunk,
+  signal,
 }) {
   if (!apiKey) {
     throw new Error('API key is required')
@@ -127,6 +129,7 @@ export async function callClaudeStream({
         messages,
         stream: true,
       }),
+      signal,
     })
 
     if (response.status === 429 && attempt < retryDelays.length) {

@@ -23,39 +23,82 @@ function getEloLabel(elo) {
   return `${elo} - perlu review`;
 }
 
+const INITIAL_FLOW_STATE = {
+  step: 'select',
+  selectedSubject: null,
+  selectedTopic: null,
+  loading: false,
+  error: null,
+  pretestData: null,
+  pretestAnswer: null,
+  pretestConfidence: 50,
+  explainText: '',
+  showSkip: false,
+  streamDone: false,
+  feynmanText: '',
+  feynmanResult: null,
+  explainAttempt: 0,
+  practiceData: null,
+  practiceAnswer: null,
+  practiceConfidence: 50,
+  practiceRevealed: false,
+  saved: false,
+};
+
 export default function ConceptEngine() {
   const { state, dispatch } = useApp();
 
-  const [step, setStep] = useState('select');
-  const [selectedSubject, setSelectedSubject] = useState(null);
-  const [selectedTopic, setSelectedTopic] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  const [step, setStep] = useState(INITIAL_FLOW_STATE.step);
+  const [selectedSubject, setSelectedSubject] = useState(INITIAL_FLOW_STATE.selectedSubject);
+  const [selectedTopic, setSelectedTopic] = useState(INITIAL_FLOW_STATE.selectedTopic);
+  const [loading, setLoading] = useState(INITIAL_FLOW_STATE.loading);
+  const [error, setError] = useState(INITIAL_FLOW_STATE.error);
 
   // Pretest state
-  const [pretestData, setPretestData] = useState(null);
-  const [pretestAnswer, setPretestAnswer] = useState(null);
-  const [pretestConfidence, setPretestConfidence] = useState(50);
+  const [pretestData, setPretestData] = useState(INITIAL_FLOW_STATE.pretestData);
+  const [pretestAnswer, setPretestAnswer] = useState(INITIAL_FLOW_STATE.pretestAnswer);
+  const [pretestConfidence, setPretestConfidence] = useState(INITIAL_FLOW_STATE.pretestConfidence);
 
   // Explain state
-  const [explainText, setExplainText] = useState('');
-  const [showSkip, setShowSkip] = useState(false);
-  const [streamDone, setStreamDone] = useState(false);
+  const [explainText, setExplainText] = useState(INITIAL_FLOW_STATE.explainText);
+  const [showSkip, setShowSkip] = useState(INITIAL_FLOW_STATE.showSkip);
+  const [streamDone, setStreamDone] = useState(INITIAL_FLOW_STATE.streamDone);
   const abortRef = useRef(false);
 
   // Feynman state
-  const [feynmanText, setFeynmanText] = useState('');
-  const [feynmanResult, setFeynmanResult] = useState(null);
-  const [explainAttempt, setExplainAttempt] = useState(0);
+  const [feynmanText, setFeynmanText] = useState(INITIAL_FLOW_STATE.feynmanText);
+  const [feynmanResult, setFeynmanResult] = useState(INITIAL_FLOW_STATE.feynmanResult);
+  const [explainAttempt, setExplainAttempt] = useState(INITIAL_FLOW_STATE.explainAttempt);
 
   // Practice state
-  const [practiceData, setPracticeData] = useState(null);
-  const [practiceAnswer, setPracticeAnswer] = useState(null);
-  const [practiceConfidence, setPracticeConfidence] = useState(50);
-  const [practiceRevealed, setPracticeRevealed] = useState(false);
+  const [practiceData, setPracticeData] = useState(INITIAL_FLOW_STATE.practiceData);
+  const [practiceAnswer, setPracticeAnswer] = useState(INITIAL_FLOW_STATE.practiceAnswer);
+  const [practiceConfidence, setPracticeConfidence] = useState(INITIAL_FLOW_STATE.practiceConfidence);
+  const [practiceRevealed, setPracticeRevealed] = useState(INITIAL_FLOW_STATE.practiceRevealed);
 
   // Grading state
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState(INITIAL_FLOW_STATE.saved);
+
+  function resetState() {
+    setStep(INITIAL_FLOW_STATE.step);
+    setSelectedSubject(INITIAL_FLOW_STATE.selectedSubject);
+    setSelectedTopic(INITIAL_FLOW_STATE.selectedTopic);
+    setPretestData(INITIAL_FLOW_STATE.pretestData);
+    setPretestAnswer(INITIAL_FLOW_STATE.pretestAnswer);
+    setPretestConfidence(INITIAL_FLOW_STATE.pretestConfidence);
+    setExplainText(INITIAL_FLOW_STATE.explainText);
+    setShowSkip(INITIAL_FLOW_STATE.showSkip);
+    setStreamDone(INITIAL_FLOW_STATE.streamDone);
+    setFeynmanText(INITIAL_FLOW_STATE.feynmanText);
+    setFeynmanResult(INITIAL_FLOW_STATE.feynmanResult);
+    setExplainAttempt(INITIAL_FLOW_STATE.explainAttempt);
+    setPracticeData(INITIAL_FLOW_STATE.practiceData);
+    setPracticeAnswer(INITIAL_FLOW_STATE.practiceAnswer);
+    setPracticeConfidence(INITIAL_FLOW_STATE.practiceConfidence);
+    setPracticeRevealed(INITIAL_FLOW_STATE.practiceRevealed);
+    setSaved(INITIAL_FLOW_STATE.saved);
+    setError(INITIAL_FLOW_STATE.error);
+  }
 
   // --- Step 0: Select ---
   if (step === 'select') {
@@ -241,24 +284,7 @@ export default function ConceptEngine() {
         saved={saved}
         setSaved={setSaved}
         onDone={() => {
-          setStep('select');
-          setSelectedSubject(null);
-          setSelectedTopic(null);
-          setPretestData(null);
-          setPretestAnswer(null);
-          setPretestConfidence(50);
-          setExplainText('');
-          setShowSkip(false);
-          setStreamDone(false);
-          setFeynmanText('');
-          setFeynmanResult(null);
-          setExplainAttempt(0);
-          setPracticeData(null);
-          setPracticeAnswer(null);
-          setPracticeConfidence(50);
-          setPracticeRevealed(false);
-          setSaved(false);
-          setError(null);
+          resetState();
         }}
       />
     );
@@ -293,6 +319,9 @@ function PretestStep({
         maxTokens: 1024,
       });
       const parsed = parseJSONSafe(raw);
+      if (!parsed || !parsed.question || !parsed.options || !parsed.answer) {
+        throw new Error('Invalid pretest response: missing required fields (question, options, answer)');
+      }
       setPretestData(parsed);
     } catch (err) {
       setError(err.message);
@@ -394,6 +423,7 @@ function ExplainStep({
   showSkip, setShowSkip, streamDone, setStreamDone, abortRef, explainAttempt, onNext,
 }) {
   const started = useRef(false);
+  const abortControllerRef = useRef(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -408,6 +438,8 @@ function ExplainStep({
 
   async function startStream() {
     setError(null);
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     try {
       const extraInstruction = explainAttempt > 0
         ? ' Gunakan analogi yang berbeda dari sebelumnya.'
@@ -418,6 +450,7 @@ function ExplainStep({
         messages: [{ role: 'user', content: `Topic: "${topic}", Subject: "${subject}".${extraInstruction}` }],
         maxTokens: 1024,
         temperature: 0.7,
+        signal: controller.signal,
         onChunk: (chunk) => {
           if (!abortRef.current) {
             setExplainText((prev) => prev + chunk);
@@ -428,6 +461,7 @@ function ExplainStep({
         setStreamDone(true);
       }
     } catch (err) {
+      if (err.name === 'AbortError') return;
       if (!abortRef.current) {
         setError(err.message);
       }
@@ -436,6 +470,9 @@ function ExplainStep({
 
   function handleSkip() {
     abortRef.current = true;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
     setStreamDone(true);
     onNext();
   }
@@ -492,11 +529,21 @@ function FeynmanStep({
   onRetryExplain, onRetryFeynman, onNext,
 }) {
   const [autoProceeding, setAutoProceeding] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     if (feynmanResult && feynmanResult.score > 80 && !autoProceeding) {
       setAutoProceeding(true);
-      const timer = setTimeout(() => onNext(), 2000);
+      const timer = setTimeout(() => {
+        if (mountedRef.current) {
+          onNext();
+        }
+      }, 2000);
       return () => clearTimeout(timer);
     }
   }, [feynmanResult]);
@@ -517,6 +564,9 @@ function FeynmanStep({
         maxTokens: 1024,
       });
       const parsed = parseJSONSafe(raw);
+      if (!parsed || typeof parsed.score !== 'number' || !Array.isArray(parsed.gaps) || !Array.isArray(parsed.strengths)) {
+        throw new Error('Invalid Feynman evaluation response: missing required fields (score, gaps, strengths)');
+      }
       setFeynmanResult(parsed);
     } catch (err) {
       setError(err.message);
@@ -690,6 +740,9 @@ function PracticeStep({
         maxTokens: 1024,
       });
       const parsed = parseJSONSafe(raw);
+      if (!parsed || !parsed.question || !parsed.options || !parsed.answer) {
+        throw new Error('Invalid practice response: missing required fields (question, options, answer)');
+      }
       setPracticeData(parsed);
     } catch (err) {
       setError(err.message);
@@ -706,11 +759,25 @@ function PracticeStep({
   function handleReveal() {
     setPracticeRevealed(true);
     const isCorrect = practiceAnswer === practiceData.answer;
+    const pretestCorrect = pretestAnswer === pretestData?.answer;
     const topicKey = `${subject}.${topic}`;
     const currentMastery = state.topicMastery[topicKey];
     const currentElo = currentMastery?.elo || 1000;
     const questionDifficulty = practiceData.difficulty || 1300;
     const newElo = updateElo(currentElo, questionDifficulty, isCorrect);
+
+    // Log pretest confidence as a calibration data point
+    if (pretestData && pretestAnswer != null) {
+      dispatch({
+        type: 'LOG_CONFIDENCE',
+        payload: {
+          confidence: pretestConfidence / 100,
+          correct: pretestCorrect,
+          timestamp: new Date().toISOString(),
+          subject,
+        },
+      });
+    }
 
     dispatch({
       type: 'LOG_CONFIDENCE',
