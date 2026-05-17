@@ -72,7 +72,7 @@ const PERSIST_FIELDS = [
   'onboarded', 'onboardedAt', 'apiKey', 'examDates', 'primaryExamId',
   'activeModule', 'focusMode', 'theme', 'sidebarCollapsed',
   'diagnosticResults', 'topicMastery', 'streak', 'lastStudyDate', 'graceDayUsed',
-  'srQueue', 'drillHistory', 'mistakes', 'focusSessions', 'preferences', 'seedStats',
+  'srQueue', 'drillHistory', 'mockExamHistory', 'mistakes', 'focusSessions', 'preferences', 'seedStats',
 ];
 
 function appReducer(state, action) {

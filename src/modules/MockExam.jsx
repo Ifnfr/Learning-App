@@ -36,14 +36,27 @@ export default function MockExam() {
   const [showSubmitWarn, setShowSubmitWarn] = useState(false);
   const [result, setResult] = useState(null);
   const [mistakesAdded, setMistakesAdded] = useState(false);
-  const timerRef = useRef(null);
+  const [error, setError] = useState(null);
   const focusApplied = useRef(false);
+  const sidebarToggled = useRef(false);
+  const focusModeToggled = useRef(false);
 
   const totalSeeds = state.seedStats.totalSeeds;
 
   useEffect(() => {
     if (totalSeeds >= 20 && screen === 'preflight') setScreen('setup');
   }, [totalSeeds]);
+
+  if (error) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', padding: '2rem', textAlign: 'center' }}>
+        <div style={{ fontSize: '3rem', marginBottom: '1rem', opacity: 0.6 }}>&#9888;</div>
+        <h2 style={{ color: 'var(--rust)', fontSize: '1.25rem', marginBottom: '0.75rem' }}>Terjadi Kesalahan</h2>
+        <p style={{ color: 'var(--text)', opacity: 0.7, marginBottom: '1.5rem', fontSize: '0.95rem', maxWidth: '400px' }}>{error}</p>
+        <button onClick={() => { setError(null); setScreen('setup'); }} style={{ padding: '0.75rem 1.5rem', borderRadius: '0.5rem', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', fontWeight: 600, cursor: 'pointer' }}>Kembali ke Setup</button>
+      </div>
+    );
+  }
 
   if (screen === 'preflight' && totalSeeds < 20) {
     return <PreflightScreen totalSeeds={totalSeeds} dispatch={dispatch} />;
@@ -61,25 +74,36 @@ export default function MockExam() {
 
   async function startExam() {
     setShowConfirm(false);
+    setError(null);
     const sizeObj = SIZES.find(s => s.key === config.size);
     if (!sizeObj) return;
     const totalQ = sizeObj.questions;
     const dist = config.distribution;
-    const loaded = [];
-    for (const [subj, pct] of Object.entries(dist)) {
-      const count = Math.round((pct / 100) * totalQ);
-      if (count <= 0) continue;
-      const all = await queryByIndex('seedBank', 'subject', subj);
-      let pool = all;
-      if (!config.allowRepeats && state.mockExamHistory.length > 0) {
-        const usedIds = new Set();
-        state.mockExamHistory.forEach(h => { if (h.questions) h.questions.forEach(q => usedIds.add(q.questionId)); });
-        pool = pool.filter(q => !usedIds.has(q.id));
+    let loaded;
+    try {
+      loaded = [];
+      for (const [subj, pct] of Object.entries(dist)) {
+        const count = Math.round((pct / 100) * totalQ);
+        if (count <= 0) continue;
+        const all = await queryByIndex('seedBank', 'subject', subj);
+        let pool = all;
+        if (!config.allowRepeats && state.mockExamHistory.length > 0) {
+          const usedIds = new Set();
+          state.mockExamHistory.forEach(h => { if (h.questions) h.questions.forEach(q => usedIds.add(q.questionId)); });
+          pool = pool.filter(q => !usedIds.has(q.id));
+        }
+        const shuffled = shuffle(pool);
+        loaded.push(...shuffled.slice(0, count));
       }
-      const shuffled = shuffle(pool);
-      loaded.push(...shuffled.slice(0, count));
+    } catch (err) {
+      setError('Gagal memuat soal dari database: ' + (err.message || 'Unknown error'));
+      return;
     }
     const final = shuffle(loaded);
+    if (final.length < sizeObj.questions) {
+      setError(`Hanya tersedia ${final.length} soal dari ${sizeObj.questions} yang dibutuhkan. Coba aktifkan "Izinkan soal yang pernah muncul" atau tambah lebih banyak seed.`);
+      return;
+    }
     setQuestions(final);
     setAnswers(new Array(final.length).fill(null));
     setMarked(new Array(final.length).fill(false));
@@ -89,18 +113,35 @@ export default function MockExam() {
     setTotalTime(totalSec);
     setTimeLeft(totalSec);
     setQuestionStartTime(Date.now());
-    dispatch({ type: 'TOGGLE_SIDEBAR' });
-    dispatch({ type: 'TOGGLE_FOCUS_MODE' });
+    // Only toggle sidebar if not already collapsed
+    if (!state.sidebarCollapsed) {
+      dispatch({ type: 'TOGGLE_SIDEBAR' });
+      sidebarToggled.current = true;
+    } else {
+      sidebarToggled.current = false;
+    }
+    // Only toggle focus mode if not already active
+    if (!state.focusMode) {
+      dispatch({ type: 'TOGGLE_FOCUS_MODE' });
+      focusModeToggled.current = true;
+    } else {
+      focusModeToggled.current = false;
+    }
     focusApplied.current = true;
     setScreen('exam');
   }
 
   function submitExam() {
-    if (timerRef.current) clearInterval(timerRef.current);
     if (focusApplied.current) {
-      dispatch({ type: 'TOGGLE_SIDEBAR' });
-      dispatch({ type: 'TOGGLE_FOCUS_MODE' });
+      if (sidebarToggled.current) {
+        dispatch({ type: 'TOGGLE_SIDEBAR' });
+      }
+      if (focusModeToggled.current) {
+        dispatch({ type: 'TOGGLE_FOCUS_MODE' });
+      }
       focusApplied.current = false;
+      sidebarToggled.current = false;
+      focusModeToggled.current = false;
     }
     const sizeObj = SIZES.find(s => s.key === config.size);
     const score = answers.filter((a, i) => a === questions[i]?.answer).length;
@@ -136,6 +177,7 @@ export default function MockExam() {
     setQuestionTimes([]);
     setResult(null);
     setMistakesAdded(false);
+    setError(null);
   }
 }
 

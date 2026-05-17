@@ -2,6 +2,8 @@ import { useState, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { calculateNextReview, brierScore } from '../lib/algorithms';
 
+const LEECH_THRESHOLD = 5;
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function SpacedReview() {
   const { state, dispatch } = useApp();
@@ -397,7 +399,7 @@ function MasteredTab({ srQueue }) {
 // ─── Leeches Tab ──────────────────────────────────────────────────────────────
 function LeechesTab({ srQueue, dispatch }) {
   const leechItems = useMemo(() => {
-    return srQueue.filter(item => (item.lapses || 0) >= 5);
+    return srQueue.filter(item => (item.lapses || 0) >= LEECH_THRESHOLD);
   }, [srQueue]);
 
   function handleRelearn() {
@@ -417,7 +419,7 @@ function LeechesTab({ srQueue, dispatch }) {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs" style={{ color: 'var(--rust)', margin: 0 }}>
-        {leechItems.length} item dengan lapses tinggi (&ge; 5)
+        {leechItems.length} item dengan lapses tinggi (&ge; {LEECH_THRESHOLD})
       </p>
       {leechItems.map(item => (
         <div
