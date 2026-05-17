@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import { calculateNextReview, brierScore } from '../lib/algorithms';
+import { fetchSRItems as syncFetchSRItems, updateSRItem as syncUpdateSRItem } from '../lib/sync';
 
 const LEECH_THRESHOLD = 5;
 
@@ -10,6 +11,19 @@ export default function SpacedReview() {
   const [activeTab, setActiveTab] = useState('today');
 
   const today = new Date().toISOString().split('T')[0];
+
+  // Load SR items from backend on mount
+  useEffect(() => {
+    async function loadSR() {
+      try {
+        const remote = await syncFetchSRItems();
+        if (remote && remote.length > 0) {
+          dispatch({ type: 'IMPORT_DATA', payload: { srQueue: remote } });
+        }
+      } catch (e) { /* use local state */ }
+    }
+    loadSR();
+  }, []);
 
   const dueItems = useMemo(() => {
     return state.srQueue.filter(item => {
@@ -141,6 +155,17 @@ function TodayTab({ dueItems, dispatch }) {
         lapses,
       },
     });
+
+    // Sync to backend
+    try {
+      syncUpdateSRItem(item.id, {
+        ...result,
+        lapses,
+        next_review: result.nextReview,
+        interval_days: result.interval,
+        quality_history_json: result.qualityHistory,
+      });
+    } catch (e) { /* offline */ }
 
     // Advance to next item
     setFlipped(false);

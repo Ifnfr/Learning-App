@@ -4,6 +4,7 @@ import { callAI } from '../lib/api';
 import { parseJSONSafe } from '../lib/parseJSON';
 import { updateElo, brierScore } from '../lib/algorithms';
 import { DRILL_SIMAK_BATCH_SYSTEM } from '../lib/prompts';
+import { logDrill } from '../lib/sync';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SUBJECTS = {
@@ -175,6 +176,26 @@ export default function DrillMode() {
         questions: drillAnswers,
       },
     });
+
+    // Sync to backend
+    try {
+      logDrill({
+        id: 'drill-' + Date.now(),
+        timestamp: new Date().toISOString(),
+        mode: config.mode,
+        questionCount: questions.length,
+        question_count: questions.length,
+        score,
+        accuracy,
+        timePerQuestion,
+        eloDeltas: finalDeltas,
+        elo_deltas_json: finalDeltas,
+        errorBreakdown,
+        error_breakdown_json: errorBreakdown,
+        questions: drillAnswers,
+        questions_json: drillAnswers,
+      });
+    } catch (e) { /* offline */ }
 
     setScreen('result');
   }
