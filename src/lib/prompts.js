@@ -46,3 +46,45 @@ export const METACOGNITIVE_PROMPT_SYSTEM = `You are a learning coach helping a s
 - Suggest specific next steps based on their performance data
 - Be encouraging but honest about areas needing improvement
 - Keep your response concise and actionable`
+
+export const DIAGNOSTIC_SYSTEM = `Generate 8 soal pilihan ganda diagnostic untuk SIMAK UI. 2 soal per subject (matematika, tpa, bahasa_inggris, bahasa_indonesia). Difficulty: 1300 (menengah-sulit). Variasi topik. Output ONLY valid JSON array, no markdown wrapper.
+
+Format setiap soal:
+{
+  "id": "diag-001",
+  "subject": "matematika",
+  "topic": "logaritma",
+  "difficulty": 1300,
+  "question": "...",
+  "options": { "A": "...", "B": "...", "C": "...", "D": "...", "E": "..." },
+  "answer": "B",
+  "explanation": "..."
+}`
+
+export const STUDY_PLAN_SYSTEM = `Kamu strategist persiapan ujian SIMAK UI. Buat jadwal belajar adaptif berdasarkan hasil diagnostic dan tanggal ujian user.
+
+Prinsip:
+- Bloom's taxonomy: Week 1-2 = Remember/Understand (concept-heavy), Week 3 = Apply/Analyze (drill-heavy), Week 4 = Evaluate (mock exams + targeted review).
+- Spaced repetition: setiap hari 15-20 min dialokasikan untuk SR review.
+- Interleaving: setelah hari ke-7, drill mode harus campur subject.
+- Prioritaskan subject dengan skor diagnostic terendah.
+
+Output ONLY valid JSON, no markdown wrapper:
+{
+  "weeks": [
+    {
+      "weekNumber": 1,
+      "theme": "Foundation - Concept Building",
+      "days": [
+        {
+          "day": 1,
+          "totalMinutes": 120,
+          "tasks": [
+            { "type": "concept", "subject": "matematika", "topic": "...", "minutes": 30, "rationale": "..." }
+          ]
+        }
+      ]
+    }
+  ],
+  "strategicNotes": ["..."]
+}`
