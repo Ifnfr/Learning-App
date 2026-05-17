@@ -1,6 +1,7 @@
 import { useApp } from '../context/AppContext';
 import TopBar from './TopBar';
 import Sidebar from './Sidebar';
+import TodayFlow from '../modules/TodayFlow';
 
 export default function AppShell() {
   const { state } = useApp();
@@ -26,17 +27,21 @@ export default function AppShell() {
           }
         `}</style>
         <div className="max-w-[960px] mx-auto px-4 sm:px-8 py-8">
-          <div
-            className="rounded-lg p-6"
-            style={{
-              backgroundColor: 'var(--bg-card)',
-              border: '1px solid var(--border)',
-            }}
-          >
-            <p style={{ color: 'var(--text)' }}>
-              Module: {state.activeModule} - Under Construction
-            </p>
-          </div>
+          {state.activeModule === 'today' ? (
+            <TodayFlow />
+          ) : (
+            <div
+              className="rounded-lg p-6"
+              style={{
+                backgroundColor: 'var(--bg-card)',
+                border: '1px solid var(--border)',
+              }}
+            >
+              <p style={{ color: 'var(--text)' }}>
+                Module: {state.activeModule} - Under Construction
+              </p>
+            </div>
+          )}
         </div>
       </main>
     </div>
