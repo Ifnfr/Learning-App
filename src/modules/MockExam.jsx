@@ -272,6 +272,8 @@ function ExamScreen({ questions, answers, setAnswers, marked, setMarked, current
   const timerRef = useRef(null);
   const [time, setTime] = useState(timeLeft);
   const startRef = useRef(Date.now());
+  const onSubmitRef = useRef(onSubmit);
+  useEffect(() => { onSubmitRef.current = onSubmit; });
 
   useEffect(() => {
     startRef.current = Date.now();
@@ -281,7 +283,7 @@ function ExamScreen({ questions, answers, setAnswers, marked, setMarked, current
       if (remaining <= 0) {
         clearInterval(timerRef.current);
         setTime(0);
-        onSubmit();
+        onSubmitRef.current();
       } else {
         setTime(remaining);
       }
